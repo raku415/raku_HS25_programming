@@ -71,3 +71,7 @@ if data:
 
 else:
     st.info("Bitte lade eine PDF/TXT hoch, um die Extraktion zu starten.")
+
+with st.expander("Debug Abgabetermin"):
+    st.write(data.get("abgabetermin", {}))
+

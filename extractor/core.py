@@ -30,6 +30,22 @@ def _collect_bullets(block: str):
 
 
 # --- Einzel-Extractor ---
+def strip_toc(txt: str) -> str:
+    """
+    Entfernt das Inhaltsverzeichnis grob: ab 'Inhaltsverzeichnis' bis zur ersten
+    Hauptüberschrift '1 ' oder '1.' o. ä. Falls nicht vorhanden: gibt Original zurück.
+    """
+    import re
+    m = re.search(r"(?im)^inhaltsverzeichnis\s*$", txt)
+    if not m:
+        return txt
+    # ab TOC-Start suchen wir die erste große Ziffernüberschrift
+    m2 = re.search(r"(?m)^(?:1[\.\s]+[A-ZÄÖÜa-zäöü]|1\s+[A-ZÄÖÜa-zäöü])", txt[m.end():])
+    if not m2:
+        return txt
+    cut = m.end() + m2.start()
+    return txt[cut:]
+
 def extract_sections(txt):
     sections = []
     for m in re.finditer(SEC_HEAD, txt):
@@ -41,15 +57,50 @@ def extract_sections(txt):
     return blocks
 
 def extract_abgabetermin(txt):
-    m = re.search(ABGABE, txt)
-    if not m: 
-        return {}
-    line = m.group('line')
-    m2 = re.search(DATE_TIME, line)
-    if not m2: 
-        return {"raw": line.strip()}
-    iso, time = norm_date(m2.group('date'), m2.group('time'))
-    return {"raw": line.strip(), "iso": iso, "time": time}
+    txt_no_toc = strip_toc(txt)
+
+    # 1) Starke Muster: Zeilen mit Abgabe/Eingabe + Datum (+/- Uhrzeit)
+    strong = re.search(
+        r"(?is)(?:Abgabe(?:termin)?|Eingabe(?:termin)?|Planunterlagen|Verfassercouvert).*?"
+        r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:[, ]+\s*(?P<time>\d{1,2}:\d{2})\s*h?)?",
+        txt_no_toc
+    )
+    if strong:
+        iso, time = norm_date(strong.group('date'), strong.group('time'))
+        # roh: ganze Zeile um den Treffer
+        line = strong.group(0).splitlines()[0].strip()
+        return {"raw": line, "iso": iso, "time": time}
+
+    # 2) Anker „Abgabetermin“ finden und im Fenster dahinter nach Datum/Zeit scannen
+    m = re.search(r"(?i)Abgabetermin", txt_no_toc)
+    if m:
+        start = m.end()
+        window = txt_no_toc[start:start+600]  # kleines Fenster hinter dem Anker
+        d = re.search(r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:[, ]+\s*(?P<time>\d{1,2}:\d{2})\s*h?)?", window)
+        if d:
+            iso, time = norm_date(d.group('date'), d.group('time'))
+            # nimm die erste sinnvolle Zeile danach als raw
+            raw_line = next((ln.strip() for ln in window.splitlines() if ln.strip()), "")
+            return {"raw": raw_line, "iso": iso, "time": time}
+
+    # 3) Fallback: überhaupt irgendeine Datum+Zeit-Zeile in Abschnitt „3.*“ (Termine)
+    #    – hilft, wenn die Beschriftung leicht anders ist
+    m3 = re.search(r"(?is)\n3\.\s.*?(?P<blk>(?:\n.+?)+?)(?:\n\d+\.\s|$)", txt_no_toc)
+    if m3:
+        blk = m3.group('blk')
+        d2 = re.search(
+            r"(?i)(Abgabe|Eingabe|Planunterlagen|Verfassercouvert).{0,80}?"
+            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:[, ]+\s*(?P<time>\d{1,2}:\d{2})\s*h?)?",
+            blk
+        )
+        if d2:
+            iso, time = norm_date(d2.group('date'), d2.group('time'))
+            raw_line = d2.group(0).splitlines()[0].strip()
+            return {"raw": raw_line, "iso": iso, "time": time}
+
+    # nichts gefunden
+    return {}
+
 
 def extract_unterlagen(txt: str):
     """
