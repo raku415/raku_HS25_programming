@@ -2,6 +2,7 @@
 import re
 import dateparser
 
+
 # -------- Regex-Bausteine --------
 SEC_HEAD = r"(?m)^(?P<num>\d+(?:\.\d+)*)\s+(?P<title>[A-ZÄÖÜa-zäöü].+)$"
 DATE_TIME = r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,\s*(?P<time>\d{1,2}:\d{2})\s*h?)?"
@@ -10,6 +11,8 @@ BESICHT = r"(?i)Besichtigung.*?am\s*(?P<date>\d{1,2}\.\d{1,2}\.\d{4}).*?\bum\b\s
 EMAIL = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
 PHONE = r"(?:\+?\d[\d\s]{6,})"
 
+BULLET = r"(?:•|\-|–|\*)"
+
 def norm_date(d, t=None):
     if not d: 
         return None, None
@@ -17,6 +20,14 @@ def norm_date(d, t=None):
     if not dt: 
         return None, None
     return dt.date().isoformat(), dt.strftime("%H:%M") if t else None
+
+def _collect_bullets(block: str):
+    lines = []
+    for ln in block.splitlines():
+        if re.match(rf"\s*{BULLET}\s+", ln):
+            lines.append(re.sub(rf"^\s*{BULLET}\s+", "", ln).strip())
+    return [x for x in lines if x]
+
 
 # --- Einzel-Extractor ---
 def extract_sections(txt):
@@ -39,6 +50,83 @@ def extract_abgabetermin(txt):
         return {"raw": line.strip()}
     iso, time = norm_date(m2.group('date'), m2.group('time'))
     return {"raw": line.strip(), "iso": iso, "time": time}
+
+def extract_unterlagen(txt: str):
+    """
+    Sucht 'Einzureichende Unterlagen' (oder Varianten) und sammelt Bullet-Punkte.
+    Endet vor der nächsten nummerierten Überschrift (z. B. '5.1' oder '6').
+    """
+    patterns = [
+        r"(?is)\bEinzureichende\s+Unterlagen\b",
+        r"(?is)\bEinreichung(?:\s*der)?\s*Unterlagen\b",
+        r"(?is)\bAbgabeinhalt\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat + r".*?(?P<blk>(?:\n.+?)+?)(?:\n\s*\d+(?:\.\d+)*\s+[A-ZÄÖÜa-zäöü]|$)", txt)
+        if not m:
+            continue
+        bullets = _collect_bullets(m.group('blk'))
+        if bullets:
+            return bullets
+        # Fallback, falls keine klassischen Bullets verwendet wurden:
+        rough = [ln.strip() for ln in m.group('blk').splitlines()
+                 if len(ln.strip()) > 3 and not re.match(r"^\s*\d+(?:\.\d+)*\s", ln)]
+        if rough:
+            return rough
+    return []
+
+def extract_abgabeort(txt: str):
+    """
+    Sucht 'Abgabeort'/'Eingabeort'/'Abgabeadresse'/'Eingabeadresse' und liefert
+    einen kleinen Rohblock mit den wahrscheinlich relevanten Zeilen (Adresse).
+    """
+    anchors = [
+        r"(?i)\bAbgabeort\b",
+        r"(?i)\bEingabeort\b",
+        r"(?i)\bAbgabeadresse\b",
+        r"(?i)\bEingabeadresse\b",
+        r"(?i)\bEingabe\b",  # generisch, nur als letzter Versuch
+    ]
+    for a in anchors:
+        m = re.search(a, txt)
+        if not m:
+            continue
+        start = max(0, m.start() - 200)
+        end   = min(len(txt), m.end() + 400)
+        window = txt[start:end]
+
+        candidates = []
+        for ln in window.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            if re.search(r"\b\d{4}\s+[A-ZÄÖÜa-zäöü\- ]+\b", s):  # 4-stellige CH-PLZ
+                candidates.append(s)
+            elif re.search(r"(?i)(strasse|straße|allee|platz|weg)\b", s):
+                candidates.append(s)
+            elif re.search(r"(?i)(Sekretariat|c/o|z\.Hd\.)", s):
+                candidates.append(s)
+
+        lines = window.splitlines()
+        idx_anchor = 0
+        cum = 0
+        for i, ln in enumerate(lines):
+            cum += len(ln) + 1
+            if cum >= (m.start() - start):
+                idx_anchor = i
+                break
+
+        near = [lines[i].strip() for i in range(idx_anchor, min(idx_anchor+6, len(lines))) if lines[i].strip()]
+
+        merged = []
+        for s in near + candidates:
+            if s and s not in merged:
+                merged.append(s)
+
+        if merged:
+            return {"raw_block": "\n".join(merged[:6]), "lines": merged[:6]}
+
+    return {}
 
 def extract_besichtigung(txt):
     m = re.search(BESICHT, txt, flags=re.DOTALL)
@@ -102,6 +190,8 @@ def parse_text(txt: str) -> dict:
         "abgabetermin": extract_abgabetermin(txt),
         "besichtigung": extract_besichtigung(txt),
         "kontakte": extract_contacts(txt),
+        "abgabeort": extract_abgabeort(txt),
+        "einzureichende_unterlagen": extract_unterlagen(txt),
         "beurteilungskriterien": extract_kriterien(txt),
         "teilnehmende": extract_teilnehmende(txt),
         "sektionen": extract_sections(txt),

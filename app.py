@@ -24,6 +24,22 @@ if uploaded:
 
     data = parse_text(txt)
 
+st.subheader("Abgabeort / Adresse")
+abg_ort = data.get("abgabeort") or {}
+if abg_ort:
+    st.code(abg_ort.get("raw_block", ""), language="text")
+else:
+    st.write("—")
+
+st.subheader("Einzureichende Unterlagen")
+unterlagen = data.get("einzureichende_unterlagen", [])
+if unterlagen:
+    for u in unterlagen:
+        st.write(f"• {u}")
+else:
+    st.write("—")
+
+
     # KPIs
     c1,c2,c3 = st.columns(3)
     with c1:
@@ -53,3 +69,5 @@ if uploaded:
 
     with st.expander("Rohtext (Debug)"):
         st.text_area("Text", value=txt[:5000], height=300)
+    
+
