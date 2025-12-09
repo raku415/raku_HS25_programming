@@ -74,69 +74,97 @@ def extract_sections(txt):
 
 def extract_abgabetermin(txt):
     """
-    Preferenziert Datum/Zeit im Abschnitt, dessen Titel 'Abgabe'/'Eingabe' enthält.
-    Fällt andernfalls auf Kapitel 3.* (Termine) zurück, ignoriert aber 'Programm/Genehmigung'.
+    VERBESSERTE VERSION:
+    Sucht gezielt nach "Abgabetermin" in Sektion 3.7 oder 3.8
+    Ignoriert explizit "Programmgenehmigung" und ähnliche Begriffe
     """
     txt_no_toc = strip_toc(txt)
-
-    # 1) Nur im "Abgabe/Eingabe"-Abschnitt suchen (z. B. "3.7 Abgabetermin und Eingabeort")
-    sec = get_section_block(txt_no_toc, r"\b(Abgabe(?:termin)?|Eingabe(?:termin)?|Eingabeort|Abgabeort)\b")
+    
+    # BLACKLIST für Begriffe, die NICHT der Abgabetermin sind
+    blacklist_patterns = [
+        r"(?i)\bProgrammgenehmigung\b",
+        r"(?i)\bGenehmigung\b",
+        r"(?i)\bBeschluss\b",
+        r"(?i)\bProtokoll\b",
+        r"(?i)\bBaustart\b",
+        r"(?i)\bBauvollendung\b",
+        r"(?i)\bBewilligung\b",
+    ]
+    
+    def is_blacklisted(text):
+        """Prüft ob Text einen Blacklist-Begriff enthält"""
+        for pattern in blacklist_patterns:
+            if re.search(pattern, text):
+                return True
+        return False
+    
     candidates = []
-    if sec:
-        # Trefferzeilen, die Abgabe/Eingabe enthalten
-        for ln in sec.splitlines():
-            if re.search(r"(?i)\b(Abgabe|Eingabe|Planunterlagen|Verfassercouvert)\b", ln):
-                m = re.search(DATE_TIME, ln)
-                if m:
-                    candidates.append(("section", ln.strip(), m.group('date'), m.group('time')))
-
-        # Falls Datum nicht in derselben Zeile steht: nachfolgende 3–4 Zeilen scannen
-        lines = sec.splitlines()
-        for i, ln in enumerate(lines):
-            if re.search(r"(?i)\b(Abgabe|Eingabe|Planunterlagen|Verfassercouvert)\b", ln) and i+1 < len(lines):
-                win = "\n".join(lines[i+1:i+5])
-                m = re.search(DATE_TIME, win)
-                if m:
-                    raw = (ln + " " + m.group(0)).strip()
-                    candidates.append(("section_follow", raw, m.group('date'), m.group('time')))
-
-    # 2) Fallback: Innerhalb Kapitel 3.* (Termine) nach typischen Abgabezeilen suchen
+    
+    # STRATEGIE 1: Suche in Sektion 3.7 oder 3.8 (höchste Priorität)
+    for section_num in ["3.7", "3.8", "3.6"]:
+        sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\s")
+        if sec:
+            # Suche nach "Abgabetermin" + Datum in dieser Sektion
+            for ln in sec.splitlines():
+                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin|Abgabe)\b", ln):
+                    if is_blacklisted(ln):
+                        continue
+                    m = re.search(DATE_TIME, ln)
+                    if m:
+                        candidates.append(("section_37", ln.strip(), m.group('date'), m.group('time'), 100))
+            
+            # Falls nicht in derselben Zeile: schaue in den nächsten Zeilen
+            lines = sec.splitlines()
+            for i, ln in enumerate(lines):
+                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin|Abgabe)\b", ln):
+                    if is_blacklisted(ln):
+                        continue
+                    # Schaue in den nächsten 3 Zeilen
+                    for j in range(i+1, min(i+4, len(lines))):
+                        next_line = lines[j]
+                        if is_blacklisted(next_line):
+                            continue
+                        m = re.search(DATE_TIME, next_line)
+                        if m:
+                            raw = f"{ln.strip()} {next_line.strip()}"
+                            candidates.append(("section_37_follow", raw, m.group('date'), m.group('time'), 95))
+    
+    # STRATEGIE 2: Suche in Kapitel 3 (Termine) generell
     if not candidates:
         m3 = re.search(r"(?is)\n3\.\s.*?(?P<blk>(?:\n.+?)+?)(?:\n\d+\.\s|$)", txt_no_toc)
         if m3:
             blk = m3.group('blk')
             for ln in blk.splitlines():
-                if re.search(r"(?i)\b(Abgabe|Eingabe|Planunterlagen|Verfassercouvert)\b", ln):
+                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin)\b", ln):
+                    if is_blacklisted(ln):
+                        continue
                     m = re.search(DATE_TIME, ln)
                     if m:
-                        candidates.append(("kap3", ln.strip(), m.group('date'), m.group('time')))
-
-    # 3) Als allerletztes (nur wenn gar nichts gefunden): globales starkes Muster
+                        candidates.append(("kap3", ln.strip(), m.group('date'), m.group('time'), 50))
+    
+    # STRATEGIE 3: Globale Suche mit starkem Muster (nur als Fallback)
     if not candidates:
-        strong = re.search(
-            r"(?is)(?:Abgabe(?:termin)?|Eingabe(?:termin)?|Planunterlagen|Verfassercouvert).*?"
-            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:[, ]+\s*(?P<time>\d{1,2}:\d{2})\s*h?)?",
-            txt_no_toc
-        )
-        if strong:
-            candidates.append(("global", strong.group(0).splitlines()[0].strip(),
-                               strong.group('date'), strong.group('time')))
-
-    # 4) Kandidaten filtern: keine Programm-/Genehmigung-/Beschluss-Zeilen zulassen
-    filtered = []
-    for src, raw, d, t in candidates:
-        if re.search(r"(?i)\b(Programm|Genehmigung|Beschluss|Protokoll)\b", raw):
-            continue
-        filtered.append((src, raw, d, t))
-
-    if not filtered:
+        # Suche explizit nach "Abgabetermin" gefolgt von Datum
+        pattern = r"(?i)Abgabetermin[^\n]*?(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,?\s*(?P<time>\d{1,2}:\d{2})\s*h?)?"
+        for m in re.finditer(pattern, txt_no_toc):
+            context = txt_no_toc[max(0, m.start()-50):min(len(txt_no_toc), m.end()+50)]
+            if is_blacklisted(context):
+                continue
+            candidates.append(("global", m.group(0).strip(), m.group('date'), m.group('time'), 20))
+    
+    if not candidates:
         return {}
-
-    # 5) Besten Kandidaten wählen: Bevorzugt aus 'section'/'section_follow', dann 'kap3', dann 'global'
-    priority = {"section": 3, "section_follow": 2, "kap3": 1, "global": 0}
-    best = max(filtered, key=lambda x: priority.get(x[0], 0))
+    
+    # Wähle Kandidaten mit höchster Priorität
+    best = max(candidates, key=lambda x: x[4])
     iso, time = norm_date(best[2], best[3])
-    return {"raw": best[1], "iso": iso, "time": time}
+    
+    return {
+        "raw": best[1], 
+        "iso": iso, 
+        "time": time,
+        "source": best[0]  # Debug-Info: Woher kam das Datum?
+    }
 
 
 def extract_unterlagen(txt: str):
@@ -255,7 +283,7 @@ def extract_contacts(txt):
     return uniq
 
 def extract_kriterien(txt):
-    # Sucht Überschrift „Beurteilungskriterien“ (z. B. 4 Beurteilungskriterien) und sammelt Bullet-Zeilen
+    # Sucht Überschrift „Beurteilungskriterien" (z. B. 4 Beurteilungskriterien) und sammelt Bullet-Zeilen
     block = re.search(r"(?is)\bBeurteilungskriterien\b.*?(?P<li>(?:\n\s*(?:•|\-).+)+)", txt)
     if not block: 
         return []
@@ -263,7 +291,7 @@ def extract_kriterien(txt):
             for ln in block.group('li').splitlines() if re.match(r"\s*(?:•|\-)\s*", ln)]
 
 def extract_teilnehmende(txt):
-    # sucht „Teilnehmende … zugelassen:“ bis zur nächsten nummerierten Überschrift
+    # sucht „Teilnehmende … zugelassen:" bis zur nächsten nummerierten Überschrift
     m = re.search(r"(?is)Teilnehmende.*?zugelassen:\s*(?P<blk>(?:\n|.)*?)(?:\n\s*\d+\.\d+|\Z)", txt)
     if not m: 
         return []
