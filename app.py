@@ -30,17 +30,17 @@ st.markdown("""
         opacity: 0.9;
     }
     .info-box {
-        background-color: #f0f2f6;
+        background-color: #4870bf;
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #667eea;
+        border-left: 4px solid #8498c1;
         margin: 10px 0;
     }
     .success-box {
-        background-color: #d4edda;
+        background-color: #487a54;
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #28a745;
+        border-left: 4px solid #718976;
         margin: 10px 0;
     }
     .stTab {
