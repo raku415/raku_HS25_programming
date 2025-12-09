@@ -81,7 +81,8 @@ def extract_abgabetermin(txt):
     Sucht nach "Planunterlagen und Verfassercouvert" mit Datum/Zeit
     Format: "10.12.2015, 16:00h"
     """
-    txt_no_toc = strip_toc(txt)
+    # Arbeite mit dem Originaltext (strip_toc entfernt manchmal zu viel)
+    txt_no_toc = txt
     
     # BLACKLIST für Begriffe, die NICHT der Abgabetermin sind
     blacklist_patterns = [
@@ -109,12 +110,26 @@ def extract_abgabetermin(txt):
     
     candidates = []
     
+    # STRATEGIE 0: Direkte Suche nach dem exakten Pattern (höchste Priorität!)
+    # Suche nach "Planunterlagen und Verfassercouvert DD.MM.YYYY, HH:MMh"
+    direct_pattern = r"(?i)Planunterlagen\s+und\s+Verfassercouvert\s+(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4}),\s*(?P<time>\d{1,2}:\d{2})h"
+    for m in re.finditer(direct_pattern, txt_no_toc):
+        line = txt_no_toc[max(0, m.start()-50):min(len(txt_no_toc), m.end()+50)].splitlines()
+        for ln in line:
+            if "Planunterlagen" in ln:
+                candidates.append(("direct_pattern", ln.strip(), m.group('date'), m.group('time'), 150))
+                break
+    
     # STRATEGIE 1: Suche in Sektion 3.7 oder 3.8 (höchste Priorität)
     # Achte auf "Abgabetermin", "Verfassercouvert", "Planunterlagen"
-    for section_num in ["3.7", "3.8", "3.6"]:
+    for section_num in ["3.8", "3.7"]:  # 3.8 zuerst, da "Abgabetermin und Eingabeort" dort sein könnte
         # Suche nach exakter Nummer (z.B. "3.7")
         sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\b")
         if not sec:
+            continue
+        
+        # Debug: Prüfe ob relevante Keywords vorhanden sind
+        if not re.search(r"(?i)(Abgabetermin|Verfassercouvert|Planunterlagen|Eingabeort)", sec):
             continue
         
         # WICHTIG: Auch nach "Verfassercouvert" und "Planunterlagen" suchen!
