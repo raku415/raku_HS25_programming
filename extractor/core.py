@@ -5,8 +5,7 @@ import dateparser
 
 # -------- Regex-Bausteine --------
 SEC_HEAD = r"(?m)^(?P<num>\d+(?:\.\d+)*)\s+(?P<title>[A-ZÄÖÜa-zäöü].+)$"
-# VERBESSERT: Optionales Leerzeichen vor "h"
-DATE_TIME = r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,?\s*(?P<time>\d{1,2}:\d{2})\s*h?)?"
+DATE_TIME = r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,\s*(?P<time>\d{1,2}:\d{2})\s*h?)?"
 ABGABE = r"(?i)Abgabetermin[^\n]*\n?(?P<line>.+)"
 BESICHT = r"(?i)Besichtigung.*?am\s*(?P<date>\d{1,2}\.\d{1,2}\.\d{4}).*?\bum\b\s*(?P<time>\d{1,2}:\d{2})\s*Uhr(?P<tail>.*)"
 EMAIL = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
@@ -75,21 +74,27 @@ def extract_sections(txt):
 
 def extract_abgabetermin(txt):
     """
-    VERBESSERTE VERSION:
-    Sucht gezielt nach "Abgabetermin" in Sektion 3.7 oder 3.8
-    Ignoriert explizit "Programmgenehmigung" und ähnliche Begriffe
+    OPTIMIERTE VERSION für Emmenbrücke PDF:
+    Sucht nach "Planunterlagen und Verfassercouvert" mit Datum/Zeit
+    Format: "10.12.2015, 16:00h"
     """
     txt_no_toc = strip_toc(txt)
     
     # BLACKLIST für Begriffe, die NICHT der Abgabetermin sind
     blacklist_patterns = [
         r"(?i)\bProgrammgenehmigung\b",
-        r"(?i)\bGenehmigung\b",
         r"(?i)\bBeschluss\b",
         r"(?i)\bProtokoll\b",
         r"(?i)\bBaustart\b",
         r"(?i)\bBauvollendung\b",
         r"(?i)\bBewilligung\b",
+        r"(?i)\bVersand\s+Programm\b",
+        r"(?i)\bBegehung\b",
+        r"(?i)\bFragenstellung\b",
+        r"(?i)\bFragenbeantwortung\b",
+        r"(?i)\bVorprüfung\b",
+        r"(?i)\bPräsentation\b",
+        r"(?i)\bAuslobung\b",
     ]
     
     def is_blacklisted(text):
@@ -102,43 +107,67 @@ def extract_abgabetermin(txt):
     candidates = []
     
     # STRATEGIE 1: Suche in Sektion 3.7 oder 3.8 (höchste Priorität)
+    # Achte auf "Abgabetermin", "Verfassercouvert", "Planunterlagen"
     for section_num in ["3.7", "3.8", "3.6"]:
         sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\s")
-        if sec:
-            # Suche nach "Abgabetermin" + Datum in dieser Sektion
-            # VERBESSERT: Verschiedene Zeitformate
-            time_patterns = [
-                r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,?\s*(?P<time>\d{1,2}:\d{2})\s*h?)",  # 10.12.2015, 16:00h
-                r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,?\s*um\s*(?P<time>\d{1,2}:\d{2}))",   # 10.12.2015, um 16:00
-            ]
+        if not sec:
+            continue
+        
+        # WICHTIG: Auch nach "Verfassercouvert" und "Planunterlagen" suchen!
+        keywords = [
+            r"\bAbgabetermin\b",
+            r"\bEingabetermin\b",
+            r"\bVerfassercouvert\b",
+            r"\bPlanunterlagen\b",
+        ]
+        
+        # Pattern für Datum + Uhrzeit (verschiedene Varianten)
+        # WICHTIG: Komma ist optional, Leerzeichen vor "h" ist optional
+        time_patterns = [
+            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4}),\s*(?P<time>\d{1,2}:\d{2})h",  # 10.12.2015, 16:00h
+            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4}),\s*(?P<time>\d{1,2}:\d{2})\s*h",  # mit Space vor h
+            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})\s+(?P<time>\d{1,2}:\d{2})\s*h",  # ohne Komma
+            r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4}),?\s*(?P<time>\d{1,2}:\d{2})",  # generisch
+        ]
+        
+        for ln in sec.splitlines():
+            # Prüfe ob Zeile eines der Keywords enthält
+            has_keyword = any(re.search(kw, ln, re.I) for kw in keywords)
+            if not has_keyword:
+                continue
             
-            for ln in sec.splitlines():
-                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin|Abgabe)\b", ln):
-                    if is_blacklisted(ln):
-                        continue
-                    for pattern in time_patterns:
-                        m = re.search(pattern, ln)
-                        if m:
-                            candidates.append(("section_37", ln.strip(), m.group('date'), m.group('time'), 100))
-                            break
+            if is_blacklisted(ln):
+                continue
             
-            # Falls nicht in derselben Zeile: schaue in den nächsten Zeilen
-            lines = sec.splitlines()
-            for i, ln in enumerate(lines):
-                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin|Abgabe)\b", ln):
-                    if is_blacklisted(ln):
-                        continue
-                    # Schaue in den nächsten 3 Zeilen
-                    for j in range(i+1, min(i+4, len(lines))):
-                        next_line = lines[j]
-                        if is_blacklisted(next_line):
-                            continue
-                        for pattern in time_patterns:
-                            m = re.search(pattern, next_line)
-                            if m:
-                                raw = f"{ln.strip()} {next_line.strip()}"
-                                candidates.append(("section_37_follow", raw, m.group('date'), m.group('time'), 95))
-                                break
+            # Versuche Datum/Zeit zu finden
+            for pattern in time_patterns:
+                m = re.search(pattern, ln)
+                if m:
+                    candidates.append(("section_exact", ln.strip(), m.group('date'), m.group('time'), 100))
+                    break
+        
+        # Falls nicht in derselben Zeile: schaue in den nächsten Zeilen
+        lines = sec.splitlines()
+        for i, ln in enumerate(lines):
+            has_keyword = any(re.search(kw, ln, re.I) for kw in keywords)
+            if not has_keyword:
+                continue
+            
+            if is_blacklisted(ln):
+                continue
+            
+            # Schaue in den nächsten 3 Zeilen
+            for j in range(i+1, min(i+4, len(lines))):
+                next_line = lines[j]
+                if is_blacklisted(next_line):
+                    continue
+                
+                for pattern in time_patterns:
+                    m = re.search(pattern, next_line)
+                    if m:
+                        raw = f"{ln.strip()} {next_line.strip()}"
+                        candidates.append(("section_follow", raw, m.group('date'), m.group('time'), 95))
+                        break
     
     # STRATEGIE 2: Suche in Kapitel 3 (Termine) generell
     if not candidates:
@@ -146,21 +175,12 @@ def extract_abgabetermin(txt):
         if m3:
             blk = m3.group('blk')
             for ln in blk.splitlines():
-                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin)\b", ln):
+                if re.search(r"(?i)\b(Abgabetermin|Eingabetermin|Verfassercouvert|Planunterlagen)\b", ln):
                     if is_blacklisted(ln):
                         continue
-                    m = re.search(DATE_TIME, ln)
+                    m = re.search(r"(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4}),?\s*(?P<time>\d{1,2}:\d{2})", ln)
                     if m:
                         candidates.append(("kap3", ln.strip(), m.group('date'), m.group('time'), 50))
-    
-    # STRATEGIE 3: Globale Suche mit starkem Muster (nur als Fallback)
-    if not candidates:
-        pattern = r"(?i)Abgabetermin[^\n]*?(?P<date>\d{1,2}\.\d{1,2}\.\d{2,4})(?:,?\s*(?P<time>\d{1,2}:\d{2})\s*h?)?"
-        for m in re.finditer(pattern, txt_no_toc):
-            context = txt_no_toc[max(0, m.start()-50):min(len(txt_no_toc), m.end()+50)]
-            if is_blacklisted(context):
-                continue
-            candidates.append(("global", m.group(0).strip(), m.group('date'), m.group('time'), 20))
     
     if not candidates:
         return {}
@@ -179,108 +199,98 @@ def extract_abgabetermin(txt):
 
 def extract_abgabeort(txt: str):
     """
-    VERBESSERTE VERSION:
-    Sucht 'Abgabeort'/'Eingabeort' in Sektion 3.7/3.8 und extrahiert
-    Sekretariat-Informationen und Adressen aus dem Fließtext.
+    OPTIMIERTE VERSION für Emmenbrücke PDF:
+    Sucht "Eingabeort für sämtliche Unterlagen ist das Sekretariat..."
     """
     txt_no_toc = strip_toc(txt)
     
-    # Priorität 1: Suche in Sektion 3.7 oder 3.8
+    # Priorität 1: Direkte Suche nach dem Satzmuster
+    pattern = r"(?i)Eingabeort\s+für\s+sämtliche\s+Unterlagen\s+ist\s+(?P<ort>[^.]+)"
+    m = re.search(pattern, txt_no_toc)
+    
+    if m:
+        ort_text = m.group('ort').strip()
+        # Bereinige den Text
+        ort_text = re.sub(r'\s+', ' ', ort_text)
+        
+        lines = [ort_text]
+        
+        # Suche nach ergänzenden Infos in der Nähe (im gleichen Abschnitt)
+        start = max(0, m.start() - 500)
+        end = min(len(txt_no_toc), m.end() + 500)
+        context = txt_no_toc[start:end]
+        
+        # Suche nach spezifischen Infos
+        patterns_to_find = [
+            (r"consero\s+ag", "consero ag"),
+            (r"Park\s+Höchi\s+Allee\s+\d+", None),
+            (r"CH\s*\d{4}\s+\w+", None),
+            (r"\d{4}\s+\w+", None),  # PLZ + Ort
+        ]
+        
+        for pat, default in patterns_to_find:
+            match = re.search(pat, context, re.I)
+            if match:
+                found_text = match.group(0).strip()
+                if found_text not in ort_text and found_text not in '\n'.join(lines):
+                    lines.append(found_text)
+        
+        # Suche auch nach E-Mail und Telefon im Sekretariat-Abschnitt
+        sec = get_section_block(txt_no_toc, r"(?i)Leitung.*Sekretariat")
+        if sec:
+            email_match = re.search(EMAIL, sec)
+            if email_match:
+                lines.append(email_match.group(0))
+            
+            phone_match = re.search(r"t\s+[\+\d\s]+", sec)
+            if phone_match:
+                lines.append(phone_match.group(0).strip())
+        
+        if lines:
+            return {
+                "raw_block": "\n".join(lines[:6]),
+                "lines": lines[:6],
+                "source": "direct_match"
+            }
+    
+    # Fallback: Suche in Sektion 3.7 oder 3.8
     for section_num in ["3.7", "3.8"]:
         sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\s")
         if not sec:
             continue
         
-        # Suche nach "Eingabeort" oder "Abgabeort" im Fließtext
-        patterns = [
-            r"(?i)Eingabeort\s+für\s+sämtliche\s+Unterlagen\s+ist\s+(?P<ort>.+?)(?:\.|$)",
-            r"(?i)Abgabeort\s+ist\s+(?P<ort>.+?)(?:\.|$)",
-            r"(?i)Eingabeort:\s*(?P<ort>.+?)(?:\.|$)",
-            r"(?i)Abgabeort:\s*(?P<ort>.+?)(?:\.|$)",
-        ]
-        
-        for pattern in patterns:
-            m = re.search(pattern, sec, re.DOTALL)
-            if m:
-                ort_text = m.group('ort').strip()
-                # Bereinige den Text (entferne Zeilenumbrüche innerhalb des Satzes)
-                ort_text = re.sub(r'\s+', ' ', ort_text)
-                
-                # Extrahiere auch Adresse falls vorhanden in der Nähe
-                lines = []
-                lines.append(ort_text)
-                
-                # Suche nach ergänzenden Adressinfos im gleichen Abschnitt
-                addr_patterns = [
-                    r"(?P<name>consero\s+ag)",
-                    r"(?P<street>Park\s+Höchi\s+Allee\s+\d+)",
-                    r"(?P<plz>\b\d{4}\s+[A-ZÄÖÜa-zäöü]+\b)",
-                    r"(?P<email>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
-                    r"(?P<phone>t\s+\+?\d[\d\s]+)",
-                ]
-                
-                for addr_pat in addr_patterns:
-                    match = re.search(addr_pat, sec, re.I)
-                    if match:
-                        addr_value = match.group(0).strip()
-                        if addr_value and addr_value not in ort_text:
-                            lines.append(addr_value)
-                
-                if lines:
-                    return {
-                        "raw_block": "\n".join(lines[:6]),
-                        "lines": lines[:6],
-                        "source": f"section_{section_num}"
-                    }
-    
-    # Fallback: Alte Methode (Fenster-basierte Suche)
-    anchors = [
-        r"(?i)\bEingabeort\b",
-        r"(?i)\bAbgabeort\b",
-        r"(?i)\bAbgabeadresse\b",
-        r"(?i)\bEingabeadresse\b",
-    ]
-    
-    for a in anchors:
-        m = re.search(a, txt_no_toc)
-        if not m:
-            continue
-        
-        start = max(0, m.start() - 100)
-        end   = min(len(txt_no_toc), m.end() + 600)
-        window = txt_no_toc[start:end]
-
-        candidates = []
-        for ln in window.splitlines():
-            s = ln.strip()
-            if not s:
-                continue
+        # Suche nach "Eingabeort" oder "Sekretariat"
+        if re.search(r"(?i)(Eingabeort|Sekretariat)", sec):
+            lines = []
             
-            # Suche nach relevanten Zeilen
-            if re.search(r"(?i)(sekretariat|consero)", s):
-                candidates.append(s)
-            elif re.search(r"\b\d{4}\s+[A-ZÄÖÜa-zäöü\- ]+\b", s):  # PLZ
-                candidates.append(s)
-            elif re.search(r"(?i)(strasse|straße|allee|platz|weg|park|höchi)", s):
-                candidates.append(s)
-            elif re.search(r"(?i)(c/o|z\.Hd\.)", s):
-                candidates.append(s)
-
-        # Deduplizieren
-        seen = set()
-        unique = []
-        for c in candidates:
-            if c not in seen:
-                seen.add(c)
-                unique.append(c)
-
-        if unique:
-            return {
-                "raw_block": "\n".join(unique[:6]),
-                "lines": unique[:6],
-                "source": "fallback"
-            }
-
+            for ln in sec.splitlines():
+                s = ln.strip()
+                if not s:
+                    continue
+                
+                # Sammle relevante Zeilen
+                if re.search(r"(?i)(Eingabeort|Sekretariat|consero)", s):
+                    lines.append(s)
+                elif re.search(r"\b\d{4}\s+[A-ZÄÖÜa-zäöü]", s):  # PLZ
+                    lines.append(s)
+                elif re.search(r"(?i)(Park|Allee|Strasse)", s):
+                    lines.append(s)
+            
+            # Deduplizieren
+            seen = set()
+            unique = []
+            for line in lines:
+                if line not in seen:
+                    seen.add(line)
+                    unique.append(line)
+            
+            if unique:
+                return {
+                    "raw_block": "\n".join(unique[:6]),
+                    "lines": unique[:6],
+                    "source": f"section_{section_num}"
+                }
+    
     return {}
 
 
