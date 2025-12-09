@@ -328,10 +328,9 @@ def extract_abgabeort(txt: str):
 
 def extract_unterlagen(txt: str):
     """
-    ÜBERARBEITETE VERSION:
-    Sucht 'Einzureichende Unterlagen / Dokumente' - laut PDF Struktur ist das in einer Sektion
-    die "3.5" oder "3.6" heißt ABER "Einzureichende Unterlagen" oder ähnliches im Titel hat.
-    Extrahiert sowohl Bullet-Points als auch wichtige Infos aus Fließtext
+    ERWEITERTE VERSION:
+    Extrahiert Unterlagen mit Titel und Beschreibung
+    Format: [{titel: "Situation", beschreibung: "1:500 als Erdgeschoss..."}, ...]
     """
     # Strategie 1: Suche nach Sektion die "Einzureichende" im Titel hat
     sec = get_section_block(txt, r"Einzureichende.*Unterlagen")
@@ -340,31 +339,65 @@ def extract_unterlagen(txt: str):
         # Strategie 2: Suche in 3.5 oder 3.6
         for section_num in ["3.6", "3.5"]:
             sec = get_section_block(txt, rf"^{section_num}\b")
-            if sec and len(sec) > 100:  # Nur wenn substanziell
+            if sec and len(sec) > 100:
                 break
     
     if not sec or len(sec) < 50:
         return []
     
     unterlagen = []
+    lines = sec.splitlines()
     
-    # Extrahiere Bullet-Points (•, -, etc.)
-    for ln in sec.splitlines():
-        s = ln.strip()
+    i = 0
+    while i < len(lines):
+        ln = lines[i].strip()
         
-        # Überspringe Überschriften
-        if re.match(r"^\d+\.\d+\s+", s):
+        # Überspringe Überschriften und leere Zeilen
+        if re.match(r"^\d+\.\d+\s+", ln) or not ln:
+            i += 1
             continue
         
-        # Bullet-Points mit • oder -
-        if re.match(r"^[•\-]\s+", s):
-            item = re.sub(r"^[•\-]\s+", "", s).strip()
-            if len(item) > 5:  # Nur substanzielle Einträge
-                unterlagen.append(item)
-        # Auch Zeilen die mit bestimmten Keywords starten (ohne Bullet)
-        elif re.match(r"^(Situation|Grundrisse|Schnitte|Fassaden|Statik|Haustechnik|Visualisierung|Modell|Honorar|Berechnungen|Verfasser|Ertrag)", s, re.I):
-            if len(s) > 10 and s not in unterlagen:
-                unterlagen.append(s)
+        # Erkenne Bullet-Point mit Titel (z.B. "• Situation" oder "• Grundrisse")
+        bullet_match = re.match(r"^[•\-]\s+(?P<titel>[A-Za-zÄÖÜäöü\s]+)\s*(?P<rest>.*)$", ln)
+        
+        if bullet_match:
+            titel = bullet_match.group('titel').strip()
+            rest = bullet_match.group('rest').strip()
+            
+            # Sammle Beschreibungstext (kann mehrzeilig sein)
+            beschreibung_parts = [rest] if rest else []
+            
+            # Schaue in die nächsten Zeilen für weiteren Text
+            j = i + 1
+            while j < len(lines):
+                next_ln = lines[j].strip()
+                
+                # Stop bei nächstem Bullet oder Überschrift
+                if re.match(r"^[•\-]\s+", next_ln) or re.match(r"^\d+\.\d+\s+", next_ln):
+                    break
+                
+                # Stop bei bestimmten Keywords (neue Sektion)
+                if re.match(r"^(Um\s+eine|Brun\s+Emmenweid)", next_ln):
+                    break
+                
+                # Füge Text hinzu
+                if next_ln:
+                    beschreibung_parts.append(next_ln)
+                
+                j += 1
+            
+            # Erstelle Unterlage-Objekt
+            beschreibung = " ".join(beschreibung_parts).strip()
+            
+            unterlagen.append({
+                "titel": titel,
+                "beschreibung": beschreibung if beschreibung else None
+            })
+            
+            # Springe zu nächster relevanter Zeile
+            i = j
+        else:
+            i += 1
     
     return unterlagen[:25]  # Max 25 Items
 

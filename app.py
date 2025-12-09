@@ -245,15 +245,22 @@ else:
             unterlagen = data.get("einzureichende_unterlagen", [])
             
             if unterlagen:
-                # Zeige erste 5 immer
-                for i, u in enumerate(unterlagen[:5], 1):
-                    st.markdown(f"**{i}.** {u}")
-                
-                # Rest in Expander
-                if len(unterlagen) > 5:
-                    with st.expander(f"➕ {len(unterlagen)-5} weitere anzeigen"):
-                        for i, u in enumerate(unterlagen[5:], 6):
-                            st.markdown(f"**{i}.** {u}")
+                for i, item in enumerate(unterlagen, 1):
+                    # Prüfe ob es ein Dict mit Titel/Beschreibung ist oder nur String
+                    if isinstance(item, dict):
+                        titel = item.get("titel", "Unterlage")
+                        beschreibung = item.get("beschreibung")
+                        
+                        if beschreibung:
+                            # Mit Beschreibung → Expander
+                            with st.expander(f"**{i}. {titel}**", expanded=False):
+                                st.write(beschreibung)
+                        else:
+                            # Ohne Beschreibung → Normaler Text
+                            st.markdown(f"**{i}.** {titel}")
+                    else:
+                        # Legacy Format (String)
+                        st.markdown(f"**{i}.** {item}")
             else:
                 st.info("Keine Unterlagen gefunden")
         
