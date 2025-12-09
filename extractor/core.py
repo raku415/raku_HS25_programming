@@ -135,6 +135,10 @@ def extract_abgabetermin(txt):
         ]
         
         for ln in sec.splitlines():
+            # WICHTIG: Überspringe die Überschriftszeile selbst (z.B. "3.7 Abgabetermin und Eingabeort")
+            if re.match(r"^\d+\.\d+\s+", ln):
+                continue
+            
             # Prüfe ob Zeile eines der Keywords enthält
             has_keyword = any(re.search(kw, ln, re.I) for kw in keywords)
             if not has_keyword:

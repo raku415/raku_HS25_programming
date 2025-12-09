@@ -49,15 +49,22 @@ print("="*80)
 
 def get_section_block(txt: str, title_regex: str):
     secs = list(re.finditer(SEC_HEAD, txt))
+    print(f"\nget_section_block: Suche nach Pattern '{title_regex}'")
     for i, m in enumerate(secs):
+        num = m.group('num')
         title = m.group('title')
-        if re.search(title_regex, title, flags=re.I):
+        full_header = f"{num} {title}"
+        print(f"  Prüfe: '{full_header}'")
+        if re.search(title_regex, full_header, flags=re.I):
+            print(f"    ✓ MATCH!")
             start = m.start()
             end = secs[i+1].start() if i+1 < len(secs) else len(txt)
             return txt[start:end]
+        else:
+            print(f"    ✗ kein Match")
     return None
 
-sec37 = get_section_block(test_text, r"^3\.7\s")
+sec37 = get_section_block(test_text, r"^3\.7\b")
 if sec37:
     print("Sektion 3.7 gefunden!")
     print(f"Inhalt:\n{sec37}")
