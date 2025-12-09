@@ -319,26 +319,64 @@ def extract_abgabeort(txt: str):
 
 def extract_unterlagen(txt: str):
     """
-    Sucht 'Einzureichende Unterlagen' (oder Varianten) und sammelt Bullet-Punkte.
-    Endet vor der nächsten nummerierten Überschrift (z. B. '5.1' oder '6').
+    ÜBERARBEITETE VERSION:
+    Sucht 'Einzureichende Unterlagen / Dokumente' in Sektion 3.5 oder 3.6
+    Extrahiert sowohl Bullet-Points als auch wichtige Infos aus Fließtext
     """
-    patterns = [
-        r"(?is)\bEinzureichende\s+Unterlagen\b",
-        r"(?is)\bEinreichung(?:\s*der)?\s*Unterlagen\b",
-        r"(?is)\bAbgabeinhalt\b",
-    ]
-    for pat in patterns:
-        m = re.search(pat + r".*?(?P<blk>(?:\n.+?)+?)(?:\n\s*\d+(?:\.\d+)*\s+[A-ZÄÖÜa-zäöü]|$)", txt)
-        if not m:
+    # Suche zuerst die richtige Sektion
+    for section_num in ["3.6", "3.5"]:
+        sec = get_section_block(txt, rf"^{section_num}\b")
+        if not sec:
             continue
-        bullets = _collect_bullets(m.group('blk'))
-        if bullets:
-            return bullets
-        # Fallback, falls keine klassischen Bullets verwendet wurden:
-        rough = [ln.strip() for ln in m.group('blk').splitlines()
-                 if len(ln.strip()) > 3 and not re.match(r"^\s*\d+(?:\.\d+)*\s", ln)]
-        if rough:
-            return rough
+        
+        # Prüfe ob es um "Einzureichende Unterlagen" geht
+        if not re.search(r"(?i)(Einzureichende\s+Unterlagen|Einreichung)", sec):
+            continue
+        
+        unterlagen = []
+        
+        # Extrahiere Bullet-Points (•, -, etc.)
+        for ln in sec.splitlines():
+            # Bullet-Points mit • oder -
+            if re.match(r"\s*[•\-]\s+", ln):
+                item = re.sub(r"^\s*[•\-]\s+", "", ln).strip()
+                if len(item) > 5:  # Nur substanzielle Einträge
+                    unterlagen.append(item)
+            # Auch nummerierte Items mit Beschreibung (z.B. "• Situation 1:500 als...")
+            elif re.match(r"\s*[•\-]\s*\w+", ln):
+                item = re.sub(r"^\s*[•\-]\s*", "", ln).strip()
+                if len(item) > 5:
+                    unterlagen.append(item)
+        
+        # Fallback: Wenn keine Bullets, suche nach Zeilen mit relevanten Keywords
+        if not unterlagen:
+            keywords = [
+                r"Pläne", r"Situation", r"Grundrisse", r"Schnitte", r"Fassaden",
+                r"Statik", r"Haustechnik", r"Visualisierung", r"Modell",
+                r"Honorarofferte", r"Berechnungen", r"Verfassercouvert", r"Ertragsspiegel"
+            ]
+            
+            for ln in sec.splitlines():
+                s = ln.strip()
+                # Überspringe Überschriften
+                if re.match(r"^\d+\.\d+\s+", s):
+                    continue
+                # Überspringe zu kurze Zeilen
+                if len(s) < 10:
+                    continue
+                
+                # Prüfe ob ein Keyword vorhanden ist
+                for kw in keywords:
+                    if re.search(kw, s, re.I):
+                        # Bereinige die Zeile
+                        cleaned = re.sub(r"^\s*[•\-]\s*", "", s)
+                        if cleaned and cleaned not in unterlagen:
+                            unterlagen.append(cleaned)
+                        break
+        
+        if unterlagen:
+            return unterlagen[:25]  # Max 25 Items
+    
     return []
 
 def extract_besichtigung(txt):
@@ -380,12 +418,51 @@ def extract_contacts(txt):
     return uniq
 
 def extract_kriterien(txt):
-    # Sucht Überschrift „Beurteilungskriterien" (z. B. 4 Beurteilungskriterien) und sammelt Bullet-Zeilen
-    block = re.search(r"(?is)\bBeurteilungskriterien\b.*?(?P<li>(?:\n\s*(?:•|\-).+)+)", txt)
-    if not block: 
-        return []
-    return [re.sub(r"^\s*(?:•|\-)\s*", "", ln).strip()
-            for ln in block.group('li').splitlines() if re.match(r"\s*(?:•|\-)\s*", ln)]
+    """
+    ÜBERARBEITETE VERSION:
+    Sucht Überschrift "Beurteilungskriterien" in Sektion 4 und sammelt Bullet-Zeilen
+    Wichtig: Unterscheidet zwischen Kriterien und anderen Listen
+    """
+    # Suche in Sektion 4
+    sec = get_section_block(txt, r"^4\b")
+    if not sec:
+        # Fallback: Globale Suche
+        block = re.search(r"(?is)\bBeurteilungskriterien\b.*?(?P<li>(?:\n\s*[•\-].+)+)", txt)
+        if not block:
+            return []
+        lines = block.group('li').splitlines()
+    else:
+        lines = sec.splitlines()
+    
+    kriterien = []
+    found_start = False
+    
+    for ln in lines:
+        s = ln.strip()
+        
+        # Erkenne Start: Zeile mit "Beurteilungskriterien"
+        if re.search(r"(?i)Beurteilungskriterien", s):
+            found_start = True
+            continue
+        
+        # Wenn wir noch nicht beim Start sind, überspringe
+        if not found_start:
+            continue
+        
+        # Stoppe bei nächster Überschrift oder bestimmten Keywords
+        if re.match(r"^\d+\.\d*\s+", s):
+            break
+        if re.search(r"(?i)(Reihenfolge|Gewichtung|Massgebend)", s):
+            break
+        
+        # Sammle Bullet-Points
+        if re.match(r"\s*[•\-]\s+", s):
+            item = re.sub(r"^\s*[•\-]\s*", "", s).strip()
+            # Filter: Keine Namen von Architekten/Personen
+            if len(item) > 10 and not re.search(r"(Zürich|Luzern|Emmen|Weggis|AG\b)", item, re.I):
+                kriterien.append(item)
+    
+    return kriterien
 
 def extract_teilnehmende(txt):
     # sucht „Teilnehmende … zugelassen:" bis zur nächsten nummerierten Überschrift
