@@ -34,13 +34,16 @@ def _collect_bullets(block: str):
 
 def get_section_block(txt: str, title_regex: str) -> str | None:
     """
-    Liefert den Textblock einer Sektion, deren Titel auf title_regex matched.
+    Liefert den Textblock einer Sektion, deren Nummer oder Titel auf title_regex matched.
     Nutzt das bestehende Überschriftenmuster SEC_HEAD.
     """
     secs = list(re.finditer(SEC_HEAD, txt))
     for i, m in enumerate(secs):
+        num = m.group('num')
         title = m.group('title')
-        if re.search(title_regex, title, flags=re.I):
+        # Suche sowohl in Nummer als auch in Titel
+        full_header = f"{num} {title}"
+        if re.search(title_regex, full_header, flags=re.I):
             start = m.start()
             end = secs[i+1].start() if i+1 < len(secs) else len(txt)
             return txt[start:end]
@@ -109,7 +112,8 @@ def extract_abgabetermin(txt):
     # STRATEGIE 1: Suche in Sektion 3.7 oder 3.8 (höchste Priorität)
     # Achte auf "Abgabetermin", "Verfassercouvert", "Planunterlagen"
     for section_num in ["3.7", "3.8", "3.6"]:
-        sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\s")
+        # Suche nach exakter Nummer (z.B. "3.7")
+        sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\b")
         if not sec:
             continue
         
@@ -236,13 +240,13 @@ def extract_abgabeort(txt: str):
                     lines.append(found_text)
         
         # Suche auch nach E-Mail und Telefon im Sekretariat-Abschnitt
-        sec = get_section_block(txt_no_toc, r"(?i)Leitung.*Sekretariat")
-        if sec:
-            email_match = re.search(EMAIL, sec)
+        sec_sekretariat = get_section_block(txt_no_toc, r"Leitung.*Sekretariat")
+        if sec_sekretariat:
+            email_match = re.search(EMAIL, sec_sekretariat)
             if email_match:
                 lines.append(email_match.group(0))
             
-            phone_match = re.search(r"t\s+[\+\d\s]+", sec)
+            phone_match = re.search(r"t\s+[\+\d\s]+", sec_sekretariat)
             if phone_match:
                 lines.append(phone_match.group(0).strip())
         
@@ -255,7 +259,7 @@ def extract_abgabeort(txt: str):
     
     # Fallback: Suche in Sektion 3.7 oder 3.8
     for section_num in ["3.7", "3.8"]:
-        sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\s")
+        sec = get_section_block(txt_no_toc, rf"^{re.escape(section_num)}\b")
         if not sec:
             continue
         
