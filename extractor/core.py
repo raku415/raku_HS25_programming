@@ -36,17 +36,26 @@ def get_section_block(txt: str, title_regex: str) -> str | None:
     """
     Liefert den Textblock einer Sektion, deren Nummer oder Titel auf title_regex matched.
     Nutzt das bestehende Überschriftenmuster SEC_HEAD.
+    WICHTIG: Nimmt die LETZTE Sektion mit dieser Nummer (ignoriert Inhaltsverzeichnis)
     """
     secs = list(re.finditer(SEC_HEAD, txt))
+    matches = []
+    
     for i, m in enumerate(secs):
         num = m.group('num')
         title = m.group('title')
-        # Suche sowohl in Nummer als auch in Titel
         full_header = f"{num} {title}"
         if re.search(title_regex, full_header, flags=re.I):
             start = m.start()
             end = secs[i+1].start() if i+1 < len(secs) else len(txt)
-            return txt[start:end]
+            content_length = end - start
+            matches.append((start, end, content_length, num, title))
+    
+    # Nimm die LÄNGSTE Sektion (die mit dem echten Inhalt, nicht das TOC)
+    if matches:
+        best = max(matches, key=lambda x: x[2])
+        return txt[best[0]:best[1]]
+    
     return None
 
 def strip_toc(txt: str) -> str:
@@ -320,64 +329,44 @@ def extract_abgabeort(txt: str):
 def extract_unterlagen(txt: str):
     """
     ÜBERARBEITETE VERSION:
-    Sucht 'Einzureichende Unterlagen / Dokumente' in Sektion 3.5 oder 3.6
+    Sucht 'Einzureichende Unterlagen / Dokumente' - laut PDF Struktur ist das in einer Sektion
+    die "3.5" oder "3.6" heißt ABER "Einzureichende Unterlagen" oder ähnliches im Titel hat.
     Extrahiert sowohl Bullet-Points als auch wichtige Infos aus Fließtext
     """
-    # Suche zuerst die richtige Sektion
-    for section_num in ["3.6", "3.5"]:
-        sec = get_section_block(txt, rf"^{section_num}\b")
-        if not sec:
-            continue
-        
-        # Prüfe ob es um "Einzureichende Unterlagen" geht
-        if not re.search(r"(?i)(Einzureichende\s+Unterlagen|Einreichung)", sec):
-            continue
-        
-        unterlagen = []
-        
-        # Extrahiere Bullet-Points (•, -, etc.)
-        for ln in sec.splitlines():
-            # Bullet-Points mit • oder -
-            if re.match(r"\s*[•\-]\s+", ln):
-                item = re.sub(r"^\s*[•\-]\s+", "", ln).strip()
-                if len(item) > 5:  # Nur substanzielle Einträge
-                    unterlagen.append(item)
-            # Auch nummerierte Items mit Beschreibung (z.B. "• Situation 1:500 als...")
-            elif re.match(r"\s*[•\-]\s*\w+", ln):
-                item = re.sub(r"^\s*[•\-]\s*", "", ln).strip()
-                if len(item) > 5:
-                    unterlagen.append(item)
-        
-        # Fallback: Wenn keine Bullets, suche nach Zeilen mit relevanten Keywords
-        if not unterlagen:
-            keywords = [
-                r"Pläne", r"Situation", r"Grundrisse", r"Schnitte", r"Fassaden",
-                r"Statik", r"Haustechnik", r"Visualisierung", r"Modell",
-                r"Honorarofferte", r"Berechnungen", r"Verfassercouvert", r"Ertragsspiegel"
-            ]
-            
-            for ln in sec.splitlines():
-                s = ln.strip()
-                # Überspringe Überschriften
-                if re.match(r"^\d+\.\d+\s+", s):
-                    continue
-                # Überspringe zu kurze Zeilen
-                if len(s) < 10:
-                    continue
-                
-                # Prüfe ob ein Keyword vorhanden ist
-                for kw in keywords:
-                    if re.search(kw, s, re.I):
-                        # Bereinige die Zeile
-                        cleaned = re.sub(r"^\s*[•\-]\s*", "", s)
-                        if cleaned and cleaned not in unterlagen:
-                            unterlagen.append(cleaned)
-                        break
-        
-        if unterlagen:
-            return unterlagen[:25]  # Max 25 Items
+    # Strategie 1: Suche nach Sektion die "Einzureichende" im Titel hat
+    sec = get_section_block(txt, r"Einzureichende.*Unterlagen")
     
-    return []
+    if not sec:
+        # Strategie 2: Suche in 3.5 oder 3.6
+        for section_num in ["3.6", "3.5"]:
+            sec = get_section_block(txt, rf"^{section_num}\b")
+            if sec and len(sec) > 100:  # Nur wenn substanziell
+                break
+    
+    if not sec or len(sec) < 50:
+        return []
+    
+    unterlagen = []
+    
+    # Extrahiere Bullet-Points (•, -, etc.)
+    for ln in sec.splitlines():
+        s = ln.strip()
+        
+        # Überspringe Überschriften
+        if re.match(r"^\d+\.\d+\s+", s):
+            continue
+        
+        # Bullet-Points mit • oder -
+        if re.match(r"^[•\-]\s+", s):
+            item = re.sub(r"^[•\-]\s+", "", s).strip()
+            if len(item) > 5:  # Nur substanzielle Einträge
+                unterlagen.append(item)
+        # Auch Zeilen die mit bestimmten Keywords starten (ohne Bullet)
+        elif re.match(r"^(Situation|Grundrisse|Schnitte|Fassaden|Statik|Haustechnik|Visualisierung|Modell|Honorar|Berechnungen|Verfasser|Ertrag)", s, re.I):
+            if len(s) > 10 and s not in unterlagen:
+                unterlagen.append(s)
+    
+    return unterlagen[:25]  # Max 25 Items
 
 def extract_besichtigung(txt):
     m = re.search(BESICHT, txt, flags=re.DOTALL)
@@ -423,43 +412,30 @@ def extract_kriterien(txt):
     Sucht Überschrift "Beurteilungskriterien" in Sektion 4 und sammelt Bullet-Zeilen
     Wichtig: Unterscheidet zwischen Kriterien und anderen Listen
     """
-    # Suche in Sektion 4
+    # Suche in Sektion 4 (nimmt die längste = die mit Inhalt)
     sec = get_section_block(txt, r"^4\b")
-    if not sec:
-        # Fallback: Globale Suche
-        block = re.search(r"(?is)\bBeurteilungskriterien\b.*?(?P<li>(?:\n\s*[•\-].+)+)", txt)
-        if not block:
-            return []
-        lines = block.group('li').splitlines()
-    else:
-        lines = sec.splitlines()
+    
+    if not sec or len(sec) < 50:
+        return []
     
     kriterien = []
-    found_start = False
     
-    for ln in lines:
+    for ln in sec.splitlines():
         s = ln.strip()
         
-        # Erkenne Start: Zeile mit "Beurteilungskriterien"
-        if re.search(r"(?i)Beurteilungskriterien", s):
-            found_start = True
+        # Überspringe Überschriften
+        if re.match(r"^\d+\.?\d*\s+", s):
             continue
         
-        # Wenn wir noch nicht beim Start sind, überspringe
-        if not found_start:
-            continue
-        
-        # Stoppe bei nächster Überschrift oder bestimmten Keywords
-        if re.match(r"^\d+\.\d*\s+", s):
-            break
+        # Stoppe bei bestimmten Keywords
         if re.search(r"(?i)(Reihenfolge|Gewichtung|Massgebend)", s):
             break
         
         # Sammle Bullet-Points
-        if re.match(r"\s*[•\-]\s+", s):
-            item = re.sub(r"^\s*[•\-]\s*", "", s).strip()
-            # Filter: Keine Namen von Architekten/Personen
-            if len(item) > 10 and not re.search(r"(Zürich|Luzern|Emmen|Weggis|AG\b)", item, re.I):
+        if re.match(r"^[•\-]\s+", s):
+            item = re.sub(r"^[•\-]\s+", "", s).strip()
+            # Filter: Keine Namen von Architekten/Personen, min. 15 Zeichen
+            if len(item) > 15 and not re.search(r"(Zürich|Luzern|Emmen|Weggis|Brun|Heierle)", item, re.I):
                 kriterien.append(item)
     
     return kriterien
