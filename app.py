@@ -30,17 +30,31 @@ st.markdown("""
         opacity: 0.9;
     }
     .info-box {
-        background-color: #4870bf;
+        background-color: #f0f2f6;
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #8498c1;
+        border-left: 4px solid #667eea;
         margin: 10px 0;
     }
     .success-box {
-        background-color: #487a54;
+        background-color: #e8f5e9;  /* Hellgrün - für Abgabeort */
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #718976;
+        border-left: 4px solid #4caf50;  /* Dunkelgrün */
+        margin: 10px 0;
+    }
+    .warning-box {
+        background-color: #fff3e0;  /* Hellorange */
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #ff9800;  /* Orange */
+        margin: 10px 0;
+    }
+    .primary-box {
+        background-color: #e3f2fd;  /* Hellblau */
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #2196f3;  /* Blau */
         margin: 10px 0;
     }
     .stTab {
@@ -245,22 +259,35 @@ else:
             unterlagen = data.get("einzureichende_unterlagen", [])
             
             if unterlagen:
-                for i, item in enumerate(unterlagen, 1):
-                    # Prüfe ob es ein Dict mit Titel/Beschreibung ist oder nur String
+                # Zeige Einleitung falls vorhanden (ohne Dropdown)
+                for item in unterlagen:
+                    if isinstance(item, dict) and item.get("typ") == "einleitung":
+                        st.info(item.get("beschreibung", ""))
+                        break
+                
+                # Zeige restliche Unterlagen
+                counter = 1
+                for item in unterlagen:
                     if isinstance(item, dict):
+                        # Skip Einleitung (wurde schon angezeigt)
+                        if item.get("typ") == "einleitung":
+                            continue
+                        
                         titel = item.get("titel", "Unterlage")
                         beschreibung = item.get("beschreibung")
                         
                         if beschreibung:
                             # Mit Beschreibung → Expander
-                            with st.expander(f"**{i}. {titel}**", expanded=False):
+                            with st.expander(f"**{counter}. {titel}**", expanded=False):
                                 st.write(beschreibung)
                         else:
                             # Ohne Beschreibung → Normaler Text
-                            st.markdown(f"**{i}.** {titel}")
+                            st.markdown(f"**{counter}.** {titel}")
+                        counter += 1
                     else:
                         # Legacy Format (String)
-                        st.markdown(f"**{i}.** {item}")
+                        st.markdown(f"**{counter}.** {item}")
+                        counter += 1
             else:
                 st.info("Keine Unterlagen gefunden")
         

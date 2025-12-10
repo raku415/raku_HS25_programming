@@ -97,25 +97,27 @@ def extract_unterlagen(txt: str):
         return []
     
     unterlagen = []
+    einleitung = None  # Für Fließtext am Anfang
     lines = sec.splitlines()
     i = 0
+    
     while i < len(lines):
         ln = lines[i].strip()
         if re.match(r"^\d+\.\d+\s+", ln) or not ln:
             i += 1
             continue
         
-        # Erkenne Bullet mit Titel UND Beschreibung in der gleichen Zeile
-        # z.B. "• Verkleinerungen auf A4 für Vorprüfung..."
-        # Oder "• Statik Aussagen zum statischen Konzept..."
+        # Erkenne Bullet-Point
         bullet_match = re.match(r"^[•\-]\s+(?P<full>.+)$", ln)
         
         if bullet_match:
             full_text = bullet_match.group('full').strip()
             
-            # Versuche Titel zu erkennen: 
-            # 1. Titel endet bei bekannten Keywords (als, für, Aussagen, Kubische, etc.)
-            # 2. Oder ist ein einzelnes Wort + evtl. "auf A4"
+            # Spezialfall: Bullet startet mit Zahl (z.B. "1 Satz Pläne")
+            number_start = re.match(r"^(\d+)\s+(.+)$", full_text)
+            if number_start:
+                full_text = number_start.group(2)  # Entferne die führende Zahl
+            
             titel = None
             rest = None
             
@@ -128,9 +130,10 @@ def extract_unterlagen(txt: str):
                 else:
                     titel = full_text
             
-            # Pattern 2: Einzelwort-Titel (Situation, Grundrisse, Schnitte, Fassaden, etc.)
+            # Pattern 2: Bekannte Titel-Keywords
             elif not titel:
                 known_titles = [
+                    r"^(Satz Pläne[^,\.]+)\s*[,\.]?\s*(.*)$",  # "Satz Pläne, ungefalten..."
                     r"^(Situation)\s+(.+)$",
                     r"^(Grundrisse)\s+(.+)$",
                     r"^(Schnitte)\s+(.+)$",
@@ -149,20 +152,38 @@ def extract_unterlagen(txt: str):
                     m = re.match(pattern, full_text, re.I)
                     if m:
                         titel = m.group(1)
-                        rest = m.group(2)
+                        rest = m.group(2) if len(m.groups()) > 1 and m.group(2) else None
                         break
             
-            # Fallback: Nimm ersten Teil bis Großbuchstabe oder Zahl (max 4 Wörter)
+            # Pattern 3: Langer Fließtext ohne klaren Titel (z.B. Einleitung)
+            # Wenn Text > 100 Zeichen und kein Doppelpunkt/Komma in ersten 30 Zeichen
+            if not titel and len(full_text) > 100:
+                first_part = full_text[:30]
+                if ':' not in first_part and ',' not in first_part:
+                    # Das ist wahrscheinlich Einleitungstext
+                    beschreibung_parts = [full_text]
+                    j = i + 1
+                    while j < len(lines):
+                        next_ln = lines[j].strip()
+                        if re.match(r"^[•\-]\s+", next_ln) or re.match(r"^\d+\.\d+\s+", next_ln):
+                            break
+                        if next_ln:
+                            beschreibung_parts.append(next_ln)
+                        j += 1
+                    
+                    einleitung = " ".join(beschreibung_parts).strip()
+                    i = j
+                    continue
+            
+            # Fallback: Nimm ersten Teil als Titel
             if not titel:
                 words = full_text.split()
                 if len(words) <= 4:
                     titel = full_text
                 else:
-                    # Nimm erste 1-3 Wörter als Titel
                     for word_count in [1, 2, 3]:
                         potential_titel = " ".join(words[:word_count])
                         potential_rest = " ".join(words[word_count:])
-                        # Prüfe ob Rest mit Großbuchstabe oder Zahl startet
                         if potential_rest and (potential_rest[0].isupper() or potential_rest[0].isdigit()):
                             titel = potential_titel
                             rest = potential_rest
@@ -187,11 +208,24 @@ def extract_unterlagen(txt: str):
                 j += 1
             
             beschreibung = " ".join(beschreibung_parts).strip()
-            unterlagen.append({"titel": titel, "beschreibung": beschreibung if beschreibung else None})
+            unterlagen.append({
+                "titel": titel, 
+                "beschreibung": beschreibung if beschreibung else None
+            })
             i = j
         else:
             i += 1
-    return unterlagen[:25]
+    
+    # Füge Einleitung am Anfang hinzu (falls vorhanden)
+    result = []
+    if einleitung:
+        result.append({
+            "titel": None,
+            "beschreibung": einleitung,
+            "typ": "einleitung"
+        })
+    result.extend(unterlagen[:25])
+    return result
 
 def extract_besichtigung(txt):
     m = re.search(BESICHT, txt, flags=re.DOTALL)
