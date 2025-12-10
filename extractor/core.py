@@ -133,26 +133,30 @@ def extract_unterlagen(txt: str):
             # Pattern 2: Bekannte Titel-Keywords
             elif not titel:
                 known_titles = [
-                    r"^(Satz Pläne[^,\.]+)\s*[,\.]?\s*(.*)$",  # "Satz Pläne, ungefalten..."
-                    r"^(Situation)\s+(.+)$",
-                    r"^(Grundrisse)\s+(.+)$",
-                    r"^(Schnitte)\s+(.+)$",
-                    r"^(Fassaden)\s+(.+)$",
-                    r"^(Statik)\s+(.+)$",
-                    r"^(Haustechnik)\s+(.+)$",
-                    r"^(Visualisierungen)\s+(.+)$",
-                    r"^(Modell)\s+(.+)$",
-                    r"^(Honorarofferte)\s+(.+)$",
-                    r"^(Berechnungen)\s+(.+)$",
-                    r"^(Verfassercouvert)\s+(.+)$",
-                    r"^(Ertragsspiegel)\s+(.+)$",
+                    (r"^(Satz Pläne.*)$", "no_detail"),  # Ganzer Text als Titel, KEIN Dropdown
+                    (r"^(Situation)\s+(.+)$", "has_detail"),
+                    (r"^(Grundrisse)\s+(.+)$", "has_detail"),
+                    (r"^(Schnitte)\s+(.+)$", "has_detail"),
+                    (r"^(Fassaden)\s+(.+)$", "has_detail"),
+                    (r"^(Statik)\s+(.+)$", "has_detail"),
+                    (r"^(Haustechnik)\s+(.+)$", "has_detail"),
+                    (r"^(Visualisierungen)\s+(.+)$", "has_detail"),
+                    (r"^(Modell)\s+(.+)$", "has_detail"),
+                    (r"^(Honorarofferte)\s+(.+)$", "has_detail"),
+                    (r"^(Berechnungen)\s+(.+)$", "has_detail"),
+                    (r"^(Verfassercouvert)\s+(.+)$", "has_detail"),
+                    (r"^(Ertragsspiegel)\s+(.+)$", "has_detail"),
                 ]
                 
-                for pattern in known_titles:
+                for pattern, detail_type in known_titles:
                     m = re.match(pattern, full_text, re.I)
                     if m:
-                        titel = m.group(1)
-                        rest = m.group(2) if len(m.groups()) > 1 and m.group(2) else None
+                        if detail_type == "no_detail":
+                            titel = m.group(1)
+                            rest = None
+                        else:
+                            titel = m.group(1)
+                            rest = m.group(2) if len(m.groups()) > 1 and m.group(2) else None
                         break
             
             # Pattern 3: Langer Fließtext ohne klaren Titel (z.B. Einleitung)
