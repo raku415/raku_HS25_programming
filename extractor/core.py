@@ -121,6 +121,27 @@ def extract_unterlagen(txt: str):
             titel = None
             rest = None
             
+            # SPEZIALFALL: Erster Bullet-Point ist sehr lang und enthält Einleitungstext
+            # z.B. "1 Satz Pläne, ungefalten... Die Grundrisse sind... Es werden keine Begrenzungen..."
+            # Wenn er "Es werden" oder "Um eine" enthält = Einleitung
+            if i == 0 or (i < 3 and not unterlagen):  # Nur in den ersten Zeilen prüfen
+                if re.search(r'(Es werden|Um eine|Sämtliche.*sind|Zu feine)', full_text):
+                    # Das ist Einleitungstext - alles sammeln
+                    beschreibung_parts = [full_text]
+                    j = i + 1
+                    while j < len(lines):
+                        next_ln = lines[j].strip()
+                        # Stoppe beim nächsten Bullet
+                        if re.match(r"^[•\-]\s+", next_ln):
+                            break
+                        if next_ln and not re.match(r"^\d+\.\d+\s+", next_ln):
+                            beschreibung_parts.append(next_ln)
+                        j += 1
+                    
+                    einleitung = " ".join(beschreibung_parts).strip()
+                    i = j
+                    continue
+            
             # Pattern 1: "Verkleinerungen auf A4" + Rest
             if full_text.startswith("Verkleinerungen"):
                 parts = full_text.split(" für ", 1)
@@ -133,6 +154,7 @@ def extract_unterlagen(txt: str):
             # Pattern 2: Bekannte Titel-Keywords
             elif not titel:
                 known_titles = [
+                    (r"^(Verkleinerungen auf A4.*)$", "no_detail"),  # Ganzer Text, kein Dropdown
                     (r"^(Satz Pläne.*)$", "no_detail"),  # Ganzer Text als Titel, KEIN Dropdown
                     (r"^(Situation)\s+(.+)$", "has_detail"),
                     (r"^(Grundrisse)\s+(.+)$", "has_detail"),
