@@ -31,17 +31,17 @@ st.markdown("""
         opacity: 0.9;
     }
     .info-box {
-        background-color: #f0f2f6;
+        background-color: #4870bf;
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #667eea;
+        border-left: 4px solid #8498c1;
         margin: 10px 0;
     }
     .success-box {
-        background-color: #e8f5e9;  /* Hellgrün - für Abgabeort */
+        background-color: #487a54;  /* Hellgrün - für Abgabeort */
         padding: 15px;
         border-radius: 8px;
-        border-left: 4px solid #4caf50;  /* Dunkelgrün */
+        border-left: 4px solid #718976;  /* Dunkelgrün */
         margin: 10px 0;
     }
     .warning-box {
