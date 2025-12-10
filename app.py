@@ -252,24 +252,34 @@ else:
     
     # TAB 2: Unterlagen & Kriterien
     with tab2:
+        # Einleitungstext über voller Breite (falls vorhanden)
+        unterlagen = data.get("einzureichende_unterlagen", [])
+        
+        einleitung_text = None
+        for item in unterlagen:
+            if isinstance(item, dict) and item.get("typ") == "einleitung":
+                einleitung_text = item.get("beschreibung")
+                break
+        
+        if einleitung_text:
+            st.markdown(f"""
+            <div style="background-color: #4B70BF; padding: 15px; border-radius: 8px; border-left: 4px solid #2498c1; margin: 10px 0; color: white;">
+                {einleitung_text}
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("---")
+        
+        # Zwei Spalten für Unterlagen und Kriterien
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📋 Einzureichende Unterlagen")
-            unterlagen = data.get("einzureichende_unterlagen", [])
             
             if unterlagen:
-                # Zeige Einleitung falls vorhanden (ohne Dropdown)
-                for item in unterlagen:
-                    if isinstance(item, dict) and item.get("typ") == "einleitung":
-                        st.info(item.get("beschreibung", ""))
-                        break
-                
-                # Zeige restliche Unterlagen
                 counter = 1
                 for item in unterlagen:
                     if isinstance(item, dict):
-                        # Skip Einleitung (wurde schon angezeigt)
+                        # Skip Einleitung (wurde schon oben angezeigt)
                         if item.get("typ") == "einleitung":
                             continue
                         
