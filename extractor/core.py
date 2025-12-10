@@ -105,10 +105,74 @@ def extract_unterlagen(txt: str):
             i += 1
             continue
         
-        bullet_match = re.match(r"^[•\-]\s+(?P<titel>[A-Za-zÄÖÜäöü\s]+)\s*(?P<rest>.*)$", ln)
+        # Erkenne Bullet mit Titel UND Beschreibung in der gleichen Zeile
+        # z.B. "• Verkleinerungen auf A4 für Vorprüfung..."
+        # Oder "• Statik Aussagen zum statischen Konzept..."
+        bullet_match = re.match(r"^[•\-]\s+(?P<full>.+)$", ln)
+        
         if bullet_match:
-            titel = bullet_match.group('titel').strip()
-            rest = bullet_match.group('rest').strip()
+            full_text = bullet_match.group('full').strip()
+            
+            # Versuche Titel zu erkennen: 
+            # 1. Titel endet bei bekannten Keywords (als, für, Aussagen, Kubische, etc.)
+            # 2. Oder ist ein einzelnes Wort + evtl. "auf A4"
+            titel = None
+            rest = None
+            
+            # Pattern 1: "Verkleinerungen auf A4" + Rest
+            if full_text.startswith("Verkleinerungen"):
+                parts = full_text.split(" für ", 1)
+                if len(parts) == 2:
+                    titel = parts[0].strip()
+                    rest = "für " + parts[1].strip()
+                else:
+                    titel = full_text
+            
+            # Pattern 2: Einzelwort-Titel (Situation, Grundrisse, Schnitte, Fassaden, etc.)
+            elif not titel:
+                known_titles = [
+                    r"^(Situation)\s+(.+)$",
+                    r"^(Grundrisse)\s+(.+)$",
+                    r"^(Schnitte)\s+(.+)$",
+                    r"^(Fassaden)\s+(.+)$",
+                    r"^(Statik)\s+(.+)$",
+                    r"^(Haustechnik)\s+(.+)$",
+                    r"^(Visualisierungen)\s+(.+)$",
+                    r"^(Modell)\s+(.+)$",
+                    r"^(Honorarofferte)\s+(.+)$",
+                    r"^(Berechnungen)\s+(.+)$",
+                    r"^(Verfassercouvert)\s+(.+)$",
+                    r"^(Ertragsspiegel)\s+(.+)$",
+                ]
+                
+                for pattern in known_titles:
+                    m = re.match(pattern, full_text, re.I)
+                    if m:
+                        titel = m.group(1)
+                        rest = m.group(2)
+                        break
+            
+            # Fallback: Nimm ersten Teil bis Großbuchstabe oder Zahl (max 4 Wörter)
+            if not titel:
+                words = full_text.split()
+                if len(words) <= 4:
+                    titel = full_text
+                else:
+                    # Nimm erste 1-3 Wörter als Titel
+                    for word_count in [1, 2, 3]:
+                        potential_titel = " ".join(words[:word_count])
+                        potential_rest = " ".join(words[word_count:])
+                        # Prüfe ob Rest mit Großbuchstabe oder Zahl startet
+                        if potential_rest and (potential_rest[0].isupper() or potential_rest[0].isdigit()):
+                            titel = potential_titel
+                            rest = potential_rest
+                            break
+                    
+                    if not titel:
+                        titel = " ".join(words[:2])
+                        rest = " ".join(words[2:]) if len(words) > 2 else None
+            
+            # Sammle weitere Beschreibungszeilen
             beschreibung_parts = [rest] if rest else []
             
             j = i + 1
