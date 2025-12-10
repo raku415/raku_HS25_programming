@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from extractor.core import parse_text
 import json
+import re
 
 st.set_page_config(
     page_title="Wettbewerb Extractor", 
@@ -256,10 +257,23 @@ else:
         unterlagen = data.get("einzureichende_unterlagen", [])
         
         einleitung_text = None
-        for item in unterlagen:
-            if isinstance(item, dict) and item.get("typ") == "einleitung":
-                einleitung_text = item.get("beschreibung")
-                break
+        start_index = 0
+        
+        # Prüfe ob das erste Item die Einleitung ist
+        if unterlagen and len(unterlagen) > 0:
+            first_item = unterlagen[0]
+            if isinstance(first_item, dict):
+                # Wenn erstes Item eine lange Beschreibung hat (> 200 Zeichen) und "Es werden" oder ähnliches enthält
+                beschreibung = first_item.get("beschreibung", "")
+                if beschreibung and len(beschreibung) > 200:
+                    if re.search(r'(Es werden|Sämtliche|vorausgesetzt|einzureichen)', beschreibung, re.I):
+                        # Kombiniere Titel + Beschreibung als Einleitung
+                        titel = first_item.get("titel", "")
+                        einleitung_text = f"{titel} {beschreibung}".strip()
+                        start_index = 1  # Überspringe erstes Item bei der Anzeige
+                elif first_item.get("typ") == "einleitung":
+                    einleitung_text = first_item.get("beschreibung")
+                    start_index = 1
         
         if einleitung_text:
             st.markdown(f"""
@@ -277,12 +291,12 @@ else:
             
             if unterlagen:
                 counter = 1
-                for item in unterlagen:
+                for idx, item in enumerate(unterlagen):
+                    # Überspringe die Einleitung
+                    if idx < start_index:
+                        continue
+                    
                     if isinstance(item, dict):
-                        # Skip Einleitung (wurde schon oben angezeigt)
-                        if item.get("typ") == "einleitung":
-                            continue
-                        
                         titel = item.get("titel", "Unterlage")
                         beschreibung = item.get("beschreibung")
                         
