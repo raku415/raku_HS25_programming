@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 from extractor.core import parse_text
+from extractor.llm_validator import LLMValidator
 import json
 import re
+import os
 
 st.set_page_config(
     page_title="Wettbewerb Extractor", 
@@ -81,9 +83,47 @@ with st.sidebar:
         st.caption(f"Größe: {file_size:.1f} KB")
     
     st.markdown("---")
+    
+    # LLM-Validierung Einstellungen
+    st.markdown("### 🤖 LLM-Validierung")
+    enable_validation = st.checkbox(
+        "Validierung aktivieren",
+        value=False,
+        help="Nutzt OpenAI, Claude und Mistral zur Validierung der Extraktion"
+    )
+    
+    if enable_validation:
+        with st.expander("🔑 API Keys konfigurieren", expanded=True):
+            st.caption("Gib mindestens einen API-Key ein:")
+            
+            openai_key = st.text_input(
+                "OpenAI API Key",
+                type="password",
+                value=os.getenv("OPENAI_API_KEY", ""),
+                help="Beginnt mit 'sk-...'"
+            )
+            
+            claude_key = st.text_input(
+                "Anthropic API Key",
+                type="password",
+                value=os.getenv("ANTHROPIC_API_KEY", ""),
+                help="Beginnt mit 'sk-ant-...'"
+            )
+            
+            mistral_key = st.text_input(
+                "Mistral API Key",
+                type="password",
+                value=os.getenv("MISTRAL_API_KEY", ""),
+                help="Von platform.mistral.ai"
+            )
+            
+            if not any([openai_key, claude_key, mistral_key]):
+                st.warning("⚠️ Mindestens ein API-Key erforderlich")
+    
+    st.markdown("---")
     st.markdown("### ℹ️ Über")
     st.caption("Dieses Tool extrahiert automatisch wichtige Informationen aus Architekturwettbewerbs-PDFs.")
-    st.caption("Version 1.0")
+    st.caption("Version 2.0 - mit LLM-Validierung")
 
 # Hauptbereich
 if not uploaded:
@@ -153,18 +193,40 @@ else:
         else:
             txt = uploaded.read().decode("utf-8", errors="ignore")
 
-        data = parse_text(txt)
+        # Erstelle Validator wenn LLM-Validierung aktiviert
+        validator = None
+        if enable_validation:
+            if any([openai_key, claude_key, mistral_key]):
+                validator = LLMValidator(
+                    openai_key=openai_key if openai_key else None,
+                    claude_key=claude_key if claude_key else None,
+                    mistral_key=mistral_key if mistral_key else None
+                )
+                st.info("🤖 LLM-Validierung wird durchgeführt... Dies kann 10-30 Sekunden dauern.")
+        
+        # Parse mit optionaler Validierung
+        data = parse_text(txt, validate=enable_validation, validator=validator)
     
     st.success("✅ Extraktion abgeschlossen!")
     
     # Tabs für verschiedene Bereiche
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Übersicht", 
-        "📋 Unterlagen & Kriterien", 
-        "👥 Teilnehmer & Kontakte",
-        "💾 Export",
-        "🔍 Debug"
-    ])
+    if enable_validation and 'llm_validation' in data:
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Übersicht", 
+            "📋 Unterlagen & Kriterien", 
+            "👥 Teilnehmer & Kontakte",
+            "🤖 LLM-Validierung",
+            "💾 Export",
+            "🔍 Debug"
+        ])
+    else:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Übersicht", 
+            "📋 Unterlagen & Kriterien", 
+            "👥 Teilnehmer & Kontakte",
+            "💾 Export",
+            "🔍 Debug"
+        ])
     
     # TAB 1: Übersicht
     with tab1:
@@ -364,8 +426,190 @@ else:
             else:
                 st.info("Keine Kontakte gefunden")
     
-    # TAB 4: Export
-    with tab4:
+    # TAB 4: LLM-Validierung (nur wenn aktiviert)
+    if enable_validation and 'llm_validation' in data:
+        with tab4:
+            st.header("🤖 LLM-Validierung")
+            
+            validation = data.get('llm_validation', {})
+            
+            # Konsens-Übersicht
+            if 'consensus' in validation and validation['consensus']:
+                consensus = validation['consensus']
+                
+                st.subheader("📊 Konsens-Analyse")
+                
+                # Metriken
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    anzahl = consensus.get('anzahl_llms', 0)
+                    st.markdown(f"""
+                    <div class="main-metric">
+                        <div class="metric-label">🤖 Anzahl LLMs</div>
+                        <div class="metric-value">{anzahl}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    gesamt_conf = consensus.get('gesamt_confidence', 0)
+                    st.markdown(f"""
+                    <div class="main-metric">
+                        <div class="metric-label">📈 Gesamt-Confidence</div>
+                        <div class="metric-value">{gesamt_conf}%</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    qualitaet = consensus.get('qualitaet', 'Unbekannt')
+                    st.markdown(f"""
+                    <div class="main-metric">
+                        <div class="metric-label">⭐ Qualität</div>
+                        <div class="metric-value" style="font-size: 18px;">{qualitaet}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                
+                # Confidence pro Feld
+                st.subheader("📋 Confidence pro Feld")
+                
+                if 'durchschnittliche_confidence' in consensus:
+                    conf_data = []
+                    einigkeit_data = consensus.get('einigkeit', {})
+                    
+                    for field, conf in consensus['durchschnittliche_confidence'].items():
+                        field_name_map = {
+                            'abgabetermin': '🗓️ Abgabetermin',
+                            'besichtigung': '👁️ Besichtigung',
+                            'kontakte': '📞 Kontakte',
+                            'einzureichende_unterlagen': '📋 Unterlagen',
+                            'beurteilungskriterien': '⭐ Kriterien'
+                        }
+                        
+                        conf_data.append({
+                            'Feld': field_name_map.get(field, field),
+                            'Confidence': f"{conf}%",
+                            'Einigkeit': einigkeit_data.get(field, 'N/A')
+                        })
+                    
+                    df_conf = pd.DataFrame(conf_data)
+                    st.dataframe(df_conf, use_container_width=True, hide_index=True)
+                
+                # Kritische Unterschiede
+                if consensus.get('kritische_unterschiede'):
+                    st.markdown("---")
+                    st.subheader("⚠️ Kritische Unterschiede")
+                    st.warning("Die folgenden Felder haben eine niedrige Übereinstimmung zwischen den LLMs:")
+                    
+                    for diff in consensus['kritische_unterschiede']:
+                        st.markdown(f"""
+                        <div class="warning-box">
+                            <strong>Feld:</strong> {diff['feld']}<br>
+                            <strong>Einigkeit:</strong> {diff['einigkeit']}<br>
+                            <strong>Empfehlung:</strong> {diff['empfehlung']}
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Details pro LLM
+            st.subheader("🔍 Details pro LLM")
+            
+            llm_tabs = []
+            llm_data = {}
+            
+            if validation.get('openai') and validation['openai'].get('status') == 'success':
+                llm_tabs.append("OpenAI GPT-4")
+                llm_data['openai'] = validation['openai']
+            
+            if validation.get('claude') and validation['claude'].get('status') == 'success':
+                llm_tabs.append("Claude Sonnet")
+                llm_data['claude'] = validation['claude']
+            
+            if validation.get('mistral') and validation['mistral'].get('status') == 'success':
+                llm_tabs.append("Mistral Large")
+                llm_data['mistral'] = validation['mistral']
+            
+            if llm_tabs:
+                llm_detail_tabs = st.tabs(llm_tabs)
+                
+                for idx, (llm_name, llm_result) in enumerate(llm_data.items()):
+                    with llm_detail_tabs[idx]:
+                        
+                        # Gesamtbewertung
+                        if 'gesamt_assessment' in llm_result:
+                            assessment = llm_result['gesamt_assessment']
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Qualität", assessment.get('qualitaet', 'N/A'))
+                            with col2:
+                                st.metric("Ø Confidence", f"{assessment.get('confidence_durchschnitt', 0)}%")
+                            
+                            if assessment.get('empfehlung'):
+                                st.info(f"**Empfehlung:** {assessment['empfehlung']}")
+                            
+                            if assessment.get('kritische_fehler'):
+                                st.error(f"**Kritische Fehler:** {', '.join(assessment['kritische_fehler'])}")
+                        
+                        st.markdown("---")
+                        
+                        # Detaillierte Validierung pro Feld
+                        fields_to_show = ['abgabetermin', 'besichtigung', 'kontakte', 
+                                         'einzureichende_unterlagen', 'beurteilungskriterien']
+                        
+                        for field in fields_to_show:
+                            if field in llm_result:
+                                field_data = llm_result[field]
+                                
+                                field_name_map = {
+                                    'abgabetermin': '🗓️ Abgabetermin',
+                                    'besichtigung': '👁️ Besichtigung',
+                                    'kontakte': '📞 Kontakte',
+                                    'einzureichende_unterlagen': '📋 Unterlagen',
+                                    'beurteilungskriterien': '⭐ Kriterien'
+                                }
+                                
+                                with st.expander(field_name_map.get(field, field), expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        korrekt = field_data.get('korrekt', False)
+                                        status_icon = "✅" if korrekt else "❌"
+                                        st.write(f"**Status:** {status_icon} {'Korrekt' if korrekt else 'Fehlerhaft'}")
+                                    
+                                    with col2:
+                                        confidence = field_data.get('confidence', 0)
+                                        st.write(f"**Confidence:** {confidence}%")
+                                    
+                                    if field_data.get('korrektur'):
+                                        st.warning(f"**Korrekturvorschlag:** {field_data['korrektur']}")
+                                    
+                                    if field_data.get('fehlende'):
+                                        st.info(f"**Fehlende Items:** {', '.join(field_data['fehlende'])}")
+                                    
+                                    if field_data.get('kommentar'):
+                                        st.caption(f"💬 {field_data['kommentar']}")
+            else:
+                st.info("Keine erfolgreichen LLM-Validierungen vorhanden")
+            
+            # Fehler-Anzeige
+            errors = []
+            for llm_name in ['openai', 'claude', 'mistral']:
+                llm_result = validation.get(llm_name)
+                if llm_result and llm_result.get('status') == 'failed':
+                    errors.append(f"**{llm_name.title()}:** {llm_result.get('error', 'Unbekannter Fehler')}")
+            
+            if errors:
+                st.markdown("---")
+                st.subheader("❌ Fehler")
+                for error in errors:
+                    st.error(error)
+    
+    # TAB 5 (oder 4 wenn keine Validierung): Export
+    export_tab = tab5 if enable_validation and 'llm_validation' in data else tab4
+    with export_tab:
         st.header("💾 Daten exportieren")
         
         col1, col2 = st.columns(2)
@@ -420,8 +664,9 @@ else:
             else:
                 st.info("Keine exportierbaren Daten vorhanden")
     
-    # TAB 5: Debug
-    with tab5:
+    # TAB 6 (oder 5 wenn keine Validierung): Debug
+    debug_tab = tab6 if enable_validation and 'llm_validation' in data else tab5
+    with debug_tab:
         st.header("🔍 Debug-Informationen")
         
         # Abgabetermin Debug

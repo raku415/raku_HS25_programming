@@ -380,8 +380,19 @@ def extract_teilnehmende(txt):
     names = [re.sub(r"^[•\-\s]+","",ln).strip() for ln in blk.splitlines() if ln.strip()]
     return [n for n in names if any(c.isalpha() for c in n)]
 
-def parse_text(txt: str) -> dict:
-    return {
+def parse_text(txt: str, validate: bool = False, validator=None) -> dict:
+    """
+    Parst den Text und extrahiert alle Wettbewerbsinformationen.
+    
+    Args:
+        txt: Der zu parsende Text
+        validate: Ob LLM-Validierung durchgeführt werden soll
+        validator: Optional ein LLMValidator-Objekt
+    
+    Returns:
+        Dictionary mit extrahierten Daten (und optional Validierungsergebnissen)
+    """
+    extracted_data = {
         "abgabetermin": extract_abgabetermin(txt),
         "besichtigung": extract_besichtigung(txt),
         "kontakte": extract_contacts(txt),
@@ -392,3 +403,16 @@ def parse_text(txt: str) -> dict:
         "sektionen": extract_sections(txt),
         "meta": {"length": len(txt)}
     }
+    
+    # Optional: LLM-Validierung
+    if validate and validator:
+        try:
+            validation_results = validator.validate_all(extracted_data, txt)
+            extracted_data["llm_validation"] = validation_results
+        except Exception as e:
+            extracted_data["llm_validation"] = {
+                "error": f"Validierung fehlgeschlagen: {str(e)}",
+                "status": "failed"
+            }
+    
+    return extracted_data
