@@ -587,7 +587,13 @@ else:
                                         st.warning(f"**Korrekturvorschlag:** {field_data['korrektur']}")
                                     
                                     if field_data.get('fehlende'):
-                                        st.info(f"**Fehlende Items:** {', '.join(field_data['fehlende'])}")
+                                        fehlende = field_data['fehlende']
+                                        # Konvertiere alle Items zu Strings
+                                        if isinstance(fehlende, list):
+                                            fehlende_str = ', '.join([str(item) for item in fehlende])
+                                            st.info(f"**Fehlende Items:** {fehlende_str}")
+                                        else:
+                                            st.info(f"**Fehlende Items:** {str(fehlende)}")
                                     
                                     if field_data.get('kommentar'):
                                         st.caption(f"💬 {field_data['kommentar']}")
