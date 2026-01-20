@@ -145,6 +145,20 @@ with st.sidebar:
                 st.success(f"✅ Aktive LLMs: {', '.join(active_llms)}")
     
     st.markdown("---")
+    
+    # Reset-Button (nur wenn Daten gecacht sind)
+    if 'extracted_data' in st.session_state and st.session_state.extracted_data is not None:
+        st.markdown("### 🔄 Neu extrahieren")
+        if st.button("🔄 Cache löschen & neu starten", use_container_width=True):
+            st.session_state.extracted_data = None
+            st.session_state.corrected_data = {}
+            st.session_state.current_file = None
+            st.rerun()
+        
+        if st.session_state.corrected_data:
+            st.caption(f"📝 {len(st.session_state.corrected_data)} Korrektur(en) gespeichert")
+    
+    st.markdown("---")
     st.markdown("### ℹ️ Über")
     st.caption("Dieses Tool extrahiert automatisch wichtige Informationen aus Architekturwettbewerbs-PDFs.")
     st.caption("Version 2.0 - mit LLM-Validierung")
@@ -203,45 +217,73 @@ else:
     data = None
     txt = ""
     
-    # Initialisiere Session State für korrigierte Daten
+    # Initialisiere Session State
     if 'corrected_data' not in st.session_state:
         st.session_state.corrected_data = {}
     
-    with st.spinner("🔄 Extrahiere Daten..."):
-        if uploaded.name.lower().endswith(".pdf"):
-            import pdfplumber
-            txt_pages = []
-            with pdfplumber.open(uploaded) as pdf:
-                for p in pdf.pages:
-                    t = p.extract_text(x_tolerance=1, y_tolerance=1) or ""
-                    if not t.strip():
-                        t = p.extract_text() or ""
-                    txt_pages.append(t)
-            txt = "\n".join(txt_pages)
-        else:
-            txt = uploaded.read().decode("utf-8", errors="ignore")
+    if 'extracted_data' not in st.session_state:
+        st.session_state.extracted_data = None
+    
+    if 'current_file' not in st.session_state:
+        st.session_state.current_file = None
+    
+    # Prüfe ob es eine neue Datei ist
+    file_changed = st.session_state.current_file != uploaded.name
+    
+    if file_changed:
+        # Neue Datei → Reset und neu extrahieren
+        st.session_state.corrected_data = {}
+        st.session_state.extracted_data = None
+        st.session_state.current_file = uploaded.name
+    
+    # Extrahiere nur wenn nötig (neue Datei oder noch keine Daten)
+    if st.session_state.extracted_data is None:
+        with st.spinner("🔄 Extrahiere Daten..."):
+            if uploaded.name.lower().endswith(".pdf"):
+                import pdfplumber
+                txt_pages = []
+                with pdfplumber.open(uploaded) as pdf:
+                    for p in pdf.pages:
+                        t = p.extract_text(x_tolerance=1, y_tolerance=1) or ""
+                        if not t.strip():
+                            t = p.extract_text() or ""
+                        txt_pages.append(t)
+                txt = "\n".join(txt_pages)
+            else:
+                txt = uploaded.read().decode("utf-8", errors="ignore")
 
-        # Erstelle Validator wenn LLM-Validierung aktiviert
-        validator = None
-        if enable_validation:
-            if any([openai_key, claude_key, mistral_key]):
-                validator = LLMValidator(
-                    openai_key=openai_key if openai_key else None,
-                    claude_key=claude_key if claude_key else None,
+            # Erstelle Validator wenn LLM-Validierung aktiviert
+            validator = None
+            if enable_validation:
+                if any([openai_key, claude_key, mistral_key]):
+                    validator = LLMValidator(
+                        openai_key=openai_key if openai_key else None,
+                        claude_key=claude_key if claude_key else None,
                     mistral_key=mistral_key if mistral_key else None
                 )
-                st.info("🤖 LLM-Validierung wird durchgeführt... Dies kann 10-30 Sekunden dauern.")
-        
-        # Parse mit optionaler Validierung
-        data = parse_text(txt, validate=enable_validation, validator=validator)
-        
-        # Wende gespeicherte Korrekturen an
-        if st.session_state.corrected_data:
-            for field, value in st.session_state.corrected_data.items():
-                if field in data:
-                    data[field] = value
+                    st.info("🤖 LLM-Validierung wird durchgeführt... Dies kann 10-30 Sekunden dauern.")
+            
+            # Parse mit optionaler Validierung (NUR beim ersten Mal!)
+            data = parse_text(txt, validate=enable_validation, validator=validator)
+            
+            # Speichere in Session State
+            st.session_state.extracted_data = data
+            st.success("✅ Extraktion abgeschlossen!")
+    else:
+        # Verwende gecachte Daten
+        data = st.session_state.extracted_data.copy()
+        st.info("ℹ️ Verwende gespeicherte Extraktion (keine erneute LLM-Validierung)")
     
-    st.success("✅ Extraktion abgeschlossen!")
+    # Wende gespeicherte Korrekturen an (nach dem Laden)
+    if st.session_state.corrected_data:
+        for field, value in st.session_state.corrected_data.items():
+            if field in data:
+                data[field] = value
+        
+        # Zeige Korrektur-Status
+        num_corrections = len(st.session_state.corrected_data)
+        st.success(f"✅ {num_corrections} Korrektur(en) angewendet")
+    
     
     # Tabs für verschiedene Bereiche
     if enable_validation and 'llm_validation' in data:
