@@ -76,22 +76,34 @@ AUFGABE:
 Überprüfe die extrahierten Daten auf Richtigkeit und Vollständigkeit. Gib für jedes Feld an:
 1. Ist die Information korrekt? (ja/nein/unklar)
 2. Confidence Score (0-100%)
-3. Korrekturvorschlag (falls nötig)
+3. Korrekturvorschlag (falls nötig) - WICHTIG: Gib IMMER einen Korrekturvorschlag wenn Information fehlt!
 4. Fehlende Informationen, die im Text vorhanden sind
+
+KRITISCHE FELDER (benötigen IMMER Korrekturvorschlag wenn leer/fehlerhaft):
+- Besichtigung Treffpunkt: Suche im Text nach "Treffpunkt", "Treff", "vor Ort", Adressen
+- Abgabeort: Vollständige Adresse mit PLZ und Ort
+- Kontakte: Name, E-Mail, Telefon
+
+Wenn ein kritisches Feld fehlt oder fehlerhaft ist:
+- Suche intensiv im Originaltext nach Alternativen
+- Gib einen konkreten Korrekturvorschlag mit den gefundenen Daten
+- Markiere es als "kritisch": true
 
 Antworte im folgenden JSON-Format:
 {{
   "abgabetermin": {{
     "korrekt": true/false,
     "confidence": 95,
-    "korrektur": "2024-12-31 14:00" oder null,
+    "korrektur": {{"datum": "2024-12-31", "zeit": "14:00"}} oder null,
+    "kritisch": false,
     "kommentar": "Optionaler Kommentar"
   }},
   "besichtigung": {{
     "korrekt": true/false,
     "confidence": 80,
-    "korrektur": null,
-    "kommentar": ""
+    "korrektur": {{"datum": "2024-11-15", "zeit": "10:00", "treffpunkt": "Haupteingang Bauherrschaft"}} oder null,
+    "kritisch": true,
+    "kommentar": "Treffpunkt fehlte - im Text gefunden"
   }},
   "kontakte": {{
     "korrekt": true/false,
@@ -137,32 +149,60 @@ Antworte NUR mit dem JSON-Objekt, ohne zusätzlichen Text."""
         if not self.openai_client:
             return {"error": "OpenAI client nicht verfügbar", "status": "failed"}
         
-        try:
-            prompt = self._create_validation_prompt(extracted_data, raw_text)
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",  # Verwende GPT-4o (neuestes Modell)
-                messages=[
-                    {"role": "system", "content": "Du bist ein Experte für die Validierung von Wettbewerbsdaten. Antworte immer mit validen JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,  # Niedrige Temperature für konsistente Ergebnisse
-                response_format={"type": "json_object"}  # Erzwinge JSON-Antwort
-            )
-            
-            result = json.loads(response.choices[0].message.content)
-            result["status"] = "success"
-            result["model"] = "gpt-4o"
-            result["timestamp"] = datetime.now().isoformat()
-            
-            return result
-            
-        except Exception as e:
-            return {
-                "error": str(e),
-                "status": "failed",
-                "model": "gpt-4o"
-            }
+        # Versuche verschiedene Modelle in Reihenfolge
+        models_to_try = [
+            "gpt-4o",           # Neuestes Modell
+            "gpt-4-turbo",      # Turbo Alternative
+            "gpt-4",            # Standard GPT-4
+            "gpt-3.5-turbo"     # Fallback
+        ]
+        
+        last_error = None
+        
+        for model in models_to_try:
+            try:
+                prompt = self._create_validation_prompt(extracted_data, raw_text)
+                
+                print(f"🔄 Versuche OpenAI mit Modell: {model}...")
+                
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Du bist ein Experte für die Validierung von Wettbewerbsdaten. Antworte immer mit validen JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"} if model in ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"] else None
+                )
+                
+                print(f"✅ OpenAI {model} Antwort erhalten")
+                
+                result = json.loads(response.choices[0].message.content)
+                result["status"] = "success"
+                result["model"] = model
+                result["timestamp"] = datetime.now().isoformat()
+                
+                return result
+                
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+                print(f"⚠️ OpenAI {model} fehlgeschlagen: {error_msg}")
+                
+                # Wenn es ein Modell-Fehler ist, versuche das nächste Modell
+                if "model" in error_msg.lower() or "not found" in error_msg.lower():
+                    continue
+                else:
+                    # Bei anderen Fehlern (z.B. API-Key, Rate-Limit) abbrechen
+                    break
+        
+        # Alle Modelle fehlgeschlagen
+        return {
+            "error": str(last_error) if last_error else "Kein OpenAI Modell verfügbar",
+            "status": "failed",
+            "model": "openai",
+            "error_type": type(last_error).__name__ if last_error else "UnknownError"
+        }
     
     def validate_with_claude(self, extracted_data: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
         """
