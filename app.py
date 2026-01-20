@@ -16,14 +16,6 @@ import os
 # 3. Eingabe direkt in der Streamlit App (siehe Sidebar)
 # =====================================================
 
-# Lade API-Keys (Priorität: Umgebungsvariablen > Default-Werte)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or DEFAULT_OPENAI_KEY
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY") or DEFAULT_ANTHROPIC_KEY
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY") or DEFAULT_MISTRAL_KEY
-
-# Prüfe ob mindestens ein Key konfiguriert ist
-CONFIG_AVAILABLE = any([OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY])
-
 st.set_page_config(
     page_title="Wettbewerb Extractor", 
     layout="wide",
