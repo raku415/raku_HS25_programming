@@ -322,8 +322,8 @@ else:
         if enable_validation and 'llm_validation' in data:
             validation = data.get('llm_validation', {})
             
-            # Sammle kritische Felder (gruppiert, nicht pro LLM)
-            critical_fields = set()
+            # Sammle kritische Felder und zähle wie viele LLMs sie als kritisch markiert haben
+            field_llm_count = {}
             
             for llm_name in ['openai', 'claude', 'mistral']:
                 llm_result = validation.get(llm_name)
@@ -333,13 +333,18 @@ else:
                         if field_data.get('kritisch') and field_data.get('korrektur'):
                             # Prüfe ob Feld schon verarbeitet wurde
                             if field not in st.session_state.get('processed_corrections', set()):
-                                critical_fields.add(field)
+                                if field not in field_llm_count:
+                                    field_llm_count[field] = 0
+                                field_llm_count[field] += 1
+            
+            # Filtere: Nur Felder wo mindestens 2 LLMs einig sind
+            critical_fields = [field for field, count in field_llm_count.items() if count >= 2]
             
             # Zeige nur Warnung mit Anzahl und Link zum Tab
             if critical_fields:
                 num_corrections = len(critical_fields)
                 st.warning(f"⚠️ **{num_corrections} kritische{'s' if num_corrections == 1 else ''} Feld{'er' if num_corrections != 1 else ''} gefunden!**")
-                st.info("💡 Die LLMs haben wichtige fehlende Informationen im PDF entdeckt. "
+                st.info("💡 Mindestens 2 LLMs haben wichtige fehlende Informationen erkannt. "
                        "Gehe zum **'LLM-Validierung'** Tab um die Vorschläge anzusehen und zu übernehmen.")
         
         # Wichtigste Metriken
@@ -429,12 +434,35 @@ else:
         with col_left:
             st.subheader("📍 Abgabeort")
             abg_ort = data.get("abgabeort") or {}
-            if abg_ort and abg_ort.get("raw_block"):
-                st.markdown(f"""
-                <div class="success-box">
-                    {abg_ort.get("raw_block", "—").replace(chr(10), "<br>")}
-                </div>
-                """, unsafe_allow_html=True)
+            
+            # Robuste Anzeige - handle verschiedene Formate
+            if abg_ort:
+                # Fall 1: Dictionary mit raw_block
+                if isinstance(abg_ort, dict) and abg_ort.get("raw_block"):
+                    raw_block = abg_ort.get("raw_block", "")
+                    st.markdown(f"""
+                    <div class="success-box">
+                        {raw_block.replace(chr(10), "<br>")}
+                    </div>
+                    """, unsafe_allow_html=True)
+                # Fall 2: Dictionary mit lines Liste
+                elif isinstance(abg_ort, dict) and abg_ort.get("lines"):
+                    lines = abg_ort.get("lines", [])
+                    formatted_text = "<br>".join(lines)
+                    st.markdown(f"""
+                    <div class="success-box">
+                        {formatted_text}
+                    </div>
+                    """, unsafe_allow_html=True)
+                # Fall 3: Einfacher String
+                elif isinstance(abg_ort, str):
+                    st.markdown(f"""
+                    <div class="success-box">
+                        {abg_ort.replace(chr(10), "<br>")}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("Keine Informationen gefunden")
             else:
                 st.info("Keine Informationen gefunden")
         
@@ -501,17 +529,27 @@ else:
         if unterlagen and len(unterlagen) > 0:
             first_item = unterlagen[0]
             if isinstance(first_item, dict):
-                # Wenn erstes Item eine lange Beschreibung hat (> 200 Zeichen) und "Es werden" oder ähnliches enthält
+                # Nur als Einleitung behandeln wenn es explizit als "einleitung" markiert ist
+                # ODER wenn es eine sehr lange Beschreibung (> 300 Zeichen) hat UND Einleitungs-Keywords enthält
+                # UND der Titel typische Einleitungs-Wörter enthält
                 beschreibung = first_item.get("beschreibung", "")
-                if beschreibung and len(beschreibung) > 200:
-                    if re.search(r'(Es werden|Sämtliche|vorausgesetzt|einzureichen)', beschreibung, re.I):
-                        # Kombiniere Titel + Beschreibung als Einleitung
-                        titel = first_item.get("titel", "")
-                        einleitung_text = f"{titel} {beschreibung}".strip()
-                        start_index = 1  # Überspringe erstes Item bei der Anzeige
-                elif first_item.get("typ") == "einleitung":
-                    einleitung_text = first_item.get("beschreibung")
-                    start_index = 1
+                titel = first_item.get("titel", "")
+                
+                is_einleitung = False
+                
+                # Explizit markiert
+                if first_item.get("typ") == "einleitung":
+                    is_einleitung = True
+                    einleitung_text = beschreibung
+                # Sehr lange Beschreibung mit Einleitungs-Charakter
+                elif (len(beschreibung) > 300 and 
+                      re.search(r'(Es werden|Sämtliche|vorausgesetzt|einzureichen|Folgende.*sind)', beschreibung, re.I) and
+                      re.search(r'(Einzureichen|Abgabe|Unterlagen|Folgende)', titel, re.I)):
+                    is_einleitung = True
+                    einleitung_text = f"{titel} {beschreibung}".strip()
+                
+                if is_einleitung:
+                    start_index = 1  # Überspringe erstes Item bei der Anzeige
         
         if einleitung_text:
             st.markdown(f"""
@@ -635,11 +673,19 @@ else:
                                     corrections_by_field[field]['kommentare'].append(field_data.get('kommentar', ''))
                                     corrections_by_field[field]['confidences'].append(field_data.get('confidence', 0))
             
+            # Filtere: Nur Felder anzeigen wo mindestens 2 LLMs das Problem erkannt haben
+            filtered_corrections = {
+                field: corrections 
+                for field, corrections in corrections_by_field.items() 
+                if len(corrections['llms']) >= 2
+            }
+            
             # Zeige zusammengefasste kritische Korrekturen
-            if corrections_by_field:
+            if filtered_corrections:
                 st.error("⚠️ **KRITISCHE FELDER GEFUNDEN** - Die LLMs haben wichtige fehlende Informationen erkannt!")
+                st.info("💡 Hinweis: Es werden nur Felder angezeigt, bei denen mindestens 2 LLMs ein Problem erkannt haben.")
                 
-                for field, field_corrections in corrections_by_field.items():
+                for field, field_corrections in filtered_corrections.items():
                     field_name_map = {
                         'abgabetermin': '🗓️ Abgabetermin',
                         'besichtigung': '👁️ Besichtigung',
@@ -719,9 +765,12 @@ else:
                                         else:
                                             adresse = str(best_correction)
                                         
+                                        # Teile Adresse in Zeilen auf
+                                        adresse_lines = adresse.split('\n') if '\n' in adresse else [adresse]
+                                        
                                         st.session_state.corrected_data['abgabeort'] = {
                                             'raw_block': adresse,
-                                            'lines': [adresse],
+                                            'lines': adresse_lines,
                                             'source': 'llm_correction'
                                         }
                                     
@@ -1078,14 +1127,33 @@ else:
                                 cell.font = header_font
                                 cell.fill = header_fill
                                 cell.alignment = Alignment(horizontal='center')
+                            
+                            # ALLE Zellen als Text formatieren
+                            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, min_col=1, max_col=worksheet.max_column):
+                                for cell in row:
+                                    cell.number_format = '@'  # Text-Format
                         
                         # Kontakte
                         if kontakte:
-                            pd.DataFrame(kontakte).to_excel(writer, sheet_name='Kontakte', index=False)
+                            df_kontakte = pd.DataFrame(kontakte)
+                            df_kontakte.to_excel(writer, sheet_name='Kontakte', index=False)
+                            
+                            # Formatiere Kontakte-Sheet als Text
+                            ws_kontakte = writer.sheets['Kontakte']
+                            for row in ws_kontakte.iter_rows(min_row=2, max_row=ws_kontakte.max_row):
+                                for cell in row:
+                                    cell.number_format = '@'
                         
                         # Teilnehmende
                         if teilnehmende:
-                            pd.DataFrame({'Teilnehmer': teilnehmende}).to_excel(writer, sheet_name='Teilnehmende', index=False)
+                            df_teiln = pd.DataFrame({'Teilnehmer': teilnehmende})
+                            df_teiln.to_excel(writer, sheet_name='Teilnehmende', index=False)
+                            
+                            # Formatiere Teilnehmende-Sheet als Text
+                            ws_teiln = writer.sheets['Teilnehmende']
+                            for row in ws_teiln.iter_rows(min_row=2, max_row=ws_teiln.max_row):
+                                for cell in row:
+                                    cell.number_format = '@'
                         
                         # Weitere Sheets
                         if data.get("einzureichende_unterlagen"):
@@ -1100,10 +1168,24 @@ else:
                                     unterlagen_data.append({'Titel': str(item), 'Beschreibung': ''})
                             
                             if unterlagen_data:
-                                pd.DataFrame(unterlagen_data).to_excel(writer, sheet_name='Unterlagen', index=False)
+                                df_unterlagen = pd.DataFrame(unterlagen_data)
+                                df_unterlagen.to_excel(writer, sheet_name='Unterlagen', index=False)
+                                
+                                # Formatiere als Text
+                                ws_unterlagen = writer.sheets['Unterlagen']
+                                for row in ws_unterlagen.iter_rows(min_row=2, max_row=ws_unterlagen.max_row):
+                                    for cell in row:
+                                        cell.number_format = '@'
                         
                         if data.get("beurteilungskriterien"):
-                            pd.DataFrame({'Kriterien': data["beurteilungskriterien"]}).to_excel(writer, sheet_name='Kriterien', index=False)
+                            df_kriterien = pd.DataFrame({'Kriterien': data["beurteilungskriterien"]})
+                            df_kriterien.to_excel(writer, sheet_name='Kriterien', index=False)
+                            
+                            # Formatiere als Text
+                            ws_kriterien = writer.sheets['Kriterien']
+                            for row in ws_kriterien.iter_rows(min_row=2, max_row=ws_kriterien.max_row):
+                                for cell in row:
+                                    cell.number_format = '@'
                     
                     output.seek(0)
                     st.download_button(
