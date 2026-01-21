@@ -916,7 +916,19 @@ else:
                                 st.info(f"**Empfehlung:** {assessment['empfehlung']}")
                             
                             if assessment.get('kritische_fehler'):
-                                st.error(f"**Kritische Fehler:** {', '.join(assessment['kritische_fehler'])}")
+                                # Konvertiere alle Items zu Strings (falls Dicts oder andere Typen)
+                                fehler_list = assessment['kritische_fehler']
+                                if isinstance(fehler_list, list):
+                                    fehler_strings = []
+                                    for item in fehler_list:
+                                        if isinstance(item, dict):
+                                            # Wenn Dict, extrahiere relevante Info
+                                            fehler_strings.append(str(item.get('fehler', item.get('field', str(item)))))
+                                        else:
+                                            fehler_strings.append(str(item))
+                                    st.error(f"**Kritische Fehler:** {', '.join(fehler_strings)}")
+                                else:
+                                    st.error(f"**Kritische Fehler:** {str(fehler_list)}")
                         
                         st.markdown("---")
                         
