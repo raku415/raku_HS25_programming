@@ -288,6 +288,27 @@ else:
     if st.session_state.corrected_data:
         for field, value in st.session_state.corrected_data.items():
             if field in data:
+                # CLEANUP: Repariere fehlerhafte Abgabeort-Daten
+                if field == 'abgabeort' and isinstance(value, dict):
+                    raw_block = value.get('raw_block', '')
+                    # Prüfe ob raw_block ein String-Dictionary ist
+                    if raw_block.startswith("{'raw_block':") or raw_block.startswith('{"raw_block":'):
+                        # Versuche das ursprüngliche Dictionary zu extrahieren
+                        try:
+                            import ast
+                            parsed = ast.literal_eval(raw_block)
+                            if isinstance(parsed, dict) and 'raw_block' in parsed:
+                                # Nutze das innere raw_block
+                                value = {
+                                    'raw_block': parsed['raw_block'],
+                                    'lines': parsed.get('lines', [parsed['raw_block']]),
+                                    'source': 'llm_correction'
+                                }
+                                # Update Session State
+                                st.session_state.corrected_data[field] = value
+                        except:
+                            pass
+                
                 data[field] = value
         
         # Zeige Korrektur-Status
@@ -782,19 +803,34 @@ else:
                                         st.session_state.corrected_data['abgabetermin'] = corrected
                                     
                                     elif field == 'abgabeort':
-                                        if isinstance(best_correction, dict):
-                                            adresse = best_correction.get('adresse', str(best_correction))
+                                        # Fall 1: best_correction ist bereits ein vollständiges Abgabeort-Dictionary
+                                        if isinstance(best_correction, dict) and 'raw_block' in best_correction:
+                                            # Verwende es direkt, aber aktualisiere die source
+                                            st.session_state.corrected_data['abgabeort'] = {
+                                                'raw_block': best_correction['raw_block'],
+                                                'lines': best_correction.get('lines', [best_correction['raw_block']]),
+                                                'source': 'llm_correction'
+                                            }
+                                        # Fall 2: best_correction hat einen 'adresse' Key
+                                        elif isinstance(best_correction, dict) and 'adresse' in best_correction:
+                                            adresse = best_correction['adresse']
+                                            adresse_lines = adresse.split('\n') if '\n' in adresse else [adresse]
+                                            
+                                            st.session_state.corrected_data['abgabeort'] = {
+                                                'raw_block': adresse,
+                                                'lines': adresse_lines,
+                                                'source': 'llm_correction'
+                                            }
+                                        # Fall 3: best_correction ist ein String oder anderes Format
                                         else:
-                                            adresse = str(best_correction)
-                                        
-                                        # Teile Adresse in Zeilen auf
-                                        adresse_lines = adresse.split('\n') if '\n' in adresse else [adresse]
-                                        
-                                        st.session_state.corrected_data['abgabeort'] = {
-                                            'raw_block': adresse,
-                                            'lines': adresse_lines,
-                                            'source': 'llm_correction'
-                                        }
+                                            adresse = str(best_correction) if not isinstance(best_correction, str) else best_correction
+                                            adresse_lines = adresse.split('\n') if '\n' in adresse else [adresse]
+                                            
+                                            st.session_state.corrected_data['abgabeort'] = {
+                                                'raw_block': adresse,
+                                                'lines': adresse_lines,
+                                                'source': 'llm_correction'
+                                            }
                                     
                                     # Markiere Feld als verarbeitet
                                     st.session_state.processed_corrections.add(field)
