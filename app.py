@@ -433,36 +433,58 @@ else:
         
         with col_left:
             st.subheader("📍 Abgabeort")
-            abg_ort = data.get("abgabeort") or {}
+            abg_ort = data.get("abgabeort")
+            
+            # DEBUG: Zeige Typ und Struktur
+            with st.expander("🔍 Debug Info (klicke um zu öffnen)", expanded=False):
+                st.write(f"**Typ:** {type(abg_ort)}")
+                st.write(f"**Ist Dict:** {isinstance(abg_ort, dict)}")
+                if isinstance(abg_ort, dict):
+                    st.write(f"**Keys:** {list(abg_ort.keys())}")
+                    st.write(f"**raw_block vorhanden:** {'raw_block' in abg_ort}")
+                    st.write(f"**lines vorhanden:** {'lines' in abg_ort}")
+                st.json(abg_ort if isinstance(abg_ort, dict) else {"value": str(abg_ort)})
             
             # Robuste Anzeige - handle verschiedene Formate
             if abg_ort:
+                displayed = False
+                
                 # Fall 1: Dictionary mit raw_block
-                if isinstance(abg_ort, dict) and abg_ort.get("raw_block"):
+                if isinstance(abg_ort, dict) and "raw_block" in abg_ort:
                     raw_block = abg_ort.get("raw_block", "")
-                    st.markdown(f"""
-                    <div class="success-box">
-                        {raw_block.replace(chr(10), "<br>")}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if raw_block:
+                        st.markdown(f"""
+                        <div class="success-box">
+                            {raw_block.replace(chr(10), "<br>")}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        displayed = True
+                
                 # Fall 2: Dictionary mit lines Liste
-                elif isinstance(abg_ort, dict) and abg_ort.get("lines"):
+                if not displayed and isinstance(abg_ort, dict) and "lines" in abg_ort:
                     lines = abg_ort.get("lines", [])
-                    formatted_text = "<br>".join(lines)
-                    st.markdown(f"""
-                    <div class="success-box">
-                        {formatted_text}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if lines:
+                        formatted_text = "<br>".join(str(line) for line in lines)
+                        st.markdown(f"""
+                        <div class="success-box">
+                            {formatted_text}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        displayed = True
+                
                 # Fall 3: Einfacher String
-                elif isinstance(abg_ort, str):
+                if not displayed and isinstance(abg_ort, str):
                     st.markdown(f"""
                     <div class="success-box">
                         {abg_ort.replace(chr(10), "<br>")}
                     </div>
                     """, unsafe_allow_html=True)
-                else:
-                    st.info("Keine Informationen gefunden")
+                    displayed = True
+                
+                # Fallback: Zeige Info wenn nichts angezeigt wurde
+                if not displayed:
+                    st.warning("⚠️ Abgabeort-Daten in unerwartetem Format")
+                    st.code(str(abg_ort))
             else:
                 st.info("Keine Informationen gefunden")
         
