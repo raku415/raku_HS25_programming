@@ -322,31 +322,23 @@ else:
         if enable_validation and 'llm_validation' in data:
             validation = data.get('llm_validation', {})
             
-            # Sammle alle kritischen Korrekturvorschläge
-            critical_corrections = []
+            # Sammle kritische Felder (gruppiert, nicht pro LLM)
+            critical_fields = set()
             
-            for llm_name in ['claude', 'openai', 'mistral']:  # Priorisiere Claude
-                llm_result = validation.get(llm_name)
-            # Sammle kritische Korrekturen (nur für Zähler)
-            critical_corrections = []
             for llm_name in ['openai', 'claude', 'mistral']:
                 llm_result = validation.get(llm_name)
                 if llm_result and llm_result.get('status') == 'success':
                     for field in ['besichtigung', 'abgabetermin', 'abgabeort', 'kontakte']:
                         field_data = llm_result.get(field, {})
                         if field_data.get('kritisch') and field_data.get('korrektur'):
-                            # Prüfe ob schon verarbeitet (übernommen oder abgelehnt)
-                            correction_id = f"{llm_name}_{field}"
-                            if correction_id not in st.session_state.get('processed_corrections', set()):
-                                critical_corrections.append({
-                                    'field': field,
-                                    'llm': llm_name
-                                })
+                            # Prüfe ob Feld schon verarbeitet wurde
+                            if field not in st.session_state.get('processed_corrections', set()):
+                                critical_fields.add(field)
             
             # Zeige nur Warnung mit Anzahl und Link zum Tab
-            if critical_corrections:
-                num_corrections = len(critical_corrections)
-                st.warning(f"⚠️ **{num_corrections} kritische Verbesserungsvorschläge gefunden!**")
+            if critical_fields:
+                num_corrections = len(critical_fields)
+                st.warning(f"⚠️ **{num_corrections} kritische{'s' if num_corrections == 1 else ''} Feld{'er' if num_corrections != 1 else ''} gefunden!**")
                 st.info("💡 Die LLMs haben wichtige fehlende Informationen im PDF entdeckt. "
                        "Gehe zum **'LLM-Validierung'** Tab um die Vorschläge anzusehen und zu übernehmen.")
         
@@ -577,8 +569,9 @@ else:
             
             validation = data.get('llm_validation', {})
             
-            # Sammle alle kritischen Korrekturen (nur die noch nicht verarbeiteten)
-            kritische_korrekturen = []
+            # Sammle und gruppiere kritische Korrekturen nach Feld
+            corrections_by_field = {}
+            
             for llm_name in ['openai', 'claude', 'mistral']:
                 llm_result = validation.get(llm_name)
                 if llm_result and llm_result.get('status') == 'success':
@@ -586,25 +579,27 @@ else:
                         if field in llm_result:
                             field_data = llm_result[field]
                             if field_data.get('kritisch') and field_data.get('korrektur'):
-                                # Eindeutige ID für diese Korrektur
-                                correction_id = f"{llm_name}_{field}"
-                                
-                                # Nur anzeigen wenn noch nicht verarbeitet
-                                if correction_id not in st.session_state.processed_corrections:
-                                    kritische_korrekturen.append({
-                                        'id': correction_id,
-                                        'llm': llm_name,
-                                        'field': field,
-                                        'korrektur': field_data['korrektur'],
-                                        'kommentar': field_data.get('kommentar', ''),
-                                        'confidence': field_data.get('confidence', 0)
-                                    })
+                                # Prüfe ob dieses Feld schon verarbeitet wurde
+                                if field not in st.session_state.processed_corrections:
+                                    # Gruppiere nach Feld
+                                    if field not in corrections_by_field:
+                                        corrections_by_field[field] = {
+                                            'llms': [],
+                                            'korrekturen': [],
+                                            'kommentare': [],
+                                            'confidences': []
+                                        }
+                                    
+                                    corrections_by_field[field]['llms'].append(llm_name)
+                                    corrections_by_field[field]['korrekturen'].append(field_data['korrektur'])
+                                    corrections_by_field[field]['kommentare'].append(field_data.get('kommentar', ''))
+                                    corrections_by_field[field]['confidences'].append(field_data.get('confidence', 0))
             
-            # Zeige kritische Korrekturen prominent an
-            if kritische_korrekturen:
+            # Zeige zusammengefasste kritische Korrekturen
+            if corrections_by_field:
                 st.error("⚠️ **KRITISCHE FELDER GEFUNDEN** - Die LLMs haben wichtige fehlende Informationen erkannt!")
                 
-                for idx, korr in enumerate(kritische_korrekturen):
+                for field, field_corrections in corrections_by_field.items():
                     field_name_map = {
                         'abgabetermin': '🗓️ Abgabetermin',
                         'besichtigung': '👁️ Besichtigung',
@@ -612,52 +607,77 @@ else:
                         'kontakte': '📞 Kontakte'
                     }
                     
+                    num_llms = len(field_corrections['llms'])
+                    avg_confidence = sum(field_corrections['confidences']) / num_llms if num_llms > 0 else 0
+                    
                     with st.container():
-                        st.markdown(f"### {field_name_map.get(korr['field'], korr['field'])}")
-                        st.caption(f"🤖 Erkannt von: {korr['llm'].title()} | Confidence: {korr['confidence']}%")
+                        # Header mit Zusammenfassung
+                        st.markdown(f"### {field_name_map.get(field, field)}")
+                        st.caption(f"🤖 {num_llms} LLM(s) haben dieses Feld als kritisch markiert | Ø Confidence: {avg_confidence:.0f}%")
                         
-                        if isinstance(korr['korrektur'], dict):
+                        # Finde die beste/häufigste Korrektur
+                        # Bei mehreren LLMs: Wähle die Korrektur mit höchster Confidence
+                        best_idx = field_corrections['confidences'].index(max(field_corrections['confidences']))
+                        best_correction = field_corrections['korrekturen'][best_idx]
+                        best_kommentar = field_corrections['kommentare'][best_idx]
+                        best_llm = field_corrections['llms'][best_idx]
+                        
+                        if isinstance(best_correction, dict):
                             col1, col2, col3 = st.columns([3, 1, 1])
                             
                             with col1:
-                                st.info(f"💡 {korr['kommentar']}")
+                                # Zeige alle LLMs und deren Vorschläge in einem Expander
+                                if num_llms > 1:
+                                    with st.expander(f"📋 Details von allen {num_llms} LLMs anzeigen", expanded=False):
+                                        for i, llm in enumerate(field_corrections['llms']):
+                                            st.markdown(f"**{llm.title()}** (Confidence: {field_corrections['confidences'][i]}%)")
+                                            st.caption(f"💬 {field_corrections['kommentare'][i]}")
+                                            
+                                            if isinstance(field_corrections['korrekturen'][i], dict):
+                                                for key, value in field_corrections['korrekturen'][i].items():
+                                                    st.text(f"  • {key.title()}: {value}")
+                                            st.markdown("---")
+                                
+                                # Zeige den besten Vorschlag prominent
+                                st.info(f"💡 **Bester Vorschlag** (von {best_llm.title()})")
+                                st.markdown(best_kommentar)
                                 st.markdown("**Vorgeschlagene Ergänzung:**")
-                                for key, value in korr['korrektur'].items():
+                                for key, value in best_correction.items():
                                     st.markdown(f"• **{key.title()}:** {value}")
                             
                             with col2:
                                 # Übernehmen-Button
-                                accept_key = f"accept_{korr['id']}_{idx}"
+                                accept_key = f"accept_{field}"
                                 if st.button(
                                     "✅ Übernehmen",
                                     key=accept_key,
                                     type="primary",
                                     use_container_width=True
                                 ):
-                                    # Wende Korrektur an
-                                    if korr['field'] == 'besichtigung':
+                                    # Wende beste Korrektur an
+                                    if field == 'besichtigung':
                                         corrected = data.get('besichtigung', {}).copy()
-                                        if 'datum' in korr['korrektur']:
-                                            corrected['iso'] = korr['korrektur']['datum']
-                                        if 'zeit' in korr['korrektur']:
-                                            corrected['time'] = korr['korrektur']['zeit']
-                                        if 'treffpunkt' in korr['korrektur']:
-                                            corrected['treffpunkt'] = korr['korrektur']['treffpunkt']
+                                        if 'datum' in best_correction:
+                                            corrected['iso'] = best_correction['datum']
+                                        if 'zeit' in best_correction:
+                                            corrected['time'] = best_correction['zeit']
+                                        if 'treffpunkt' in best_correction:
+                                            corrected['treffpunkt'] = best_correction['treffpunkt']
                                         st.session_state.corrected_data['besichtigung'] = corrected
                                     
-                                    elif korr['field'] == 'abgabetermin':
+                                    elif field == 'abgabetermin':
                                         corrected = data.get('abgabetermin', {}).copy()
-                                        if 'datum' in korr['korrektur']:
-                                            corrected['iso'] = korr['korrektur']['datum']
-                                        if 'zeit' in korr['korrektur']:
-                                            corrected['time'] = korr['korrektur']['zeit']
+                                        if 'datum' in best_correction:
+                                            corrected['iso'] = best_correction['datum']
+                                        if 'zeit' in best_correction:
+                                            corrected['time'] = best_correction['zeit']
                                         st.session_state.corrected_data['abgabetermin'] = corrected
                                     
-                                    elif korr['field'] == 'abgabeort':
-                                        if isinstance(korr['korrektur'], dict):
-                                            adresse = korr['korrektur'].get('adresse', str(korr['korrektur']))
+                                    elif field == 'abgabeort':
+                                        if isinstance(best_correction, dict):
+                                            adresse = best_correction.get('adresse', str(best_correction))
                                         else:
-                                            adresse = str(korr['korrektur'])
+                                            adresse = str(best_correction)
                                         
                                         st.session_state.corrected_data['abgabeort'] = {
                                             'raw_block': adresse,
@@ -665,21 +685,21 @@ else:
                                             'source': 'llm_correction'
                                         }
                                     
-                                    # Markiere als verarbeitet
-                                    st.session_state.processed_corrections.add(korr['id'])
+                                    # Markiere Feld als verarbeitet
+                                    st.session_state.processed_corrections.add(field)
                                     st.success("✅ Korrektur übernommen!")
                                     st.rerun()
                             
                             with col3:
                                 # Ablehnen-Button
-                                reject_key = f"reject_{korr['id']}_{idx}"
+                                reject_key = f"reject_{field}"
                                 if st.button(
                                     "❌ Ablehnen",
                                     key=reject_key,
                                     use_container_width=True
                                 ):
-                                    # Markiere als verarbeitet (aber nicht übernehmen)
-                                    st.session_state.processed_corrections.add(korr['id'])
+                                    # Markiere Feld als verarbeitet
+                                    st.session_state.processed_corrections.add(field)
                                     st.info("Vorschlag abgelehnt")
                                     st.rerun()
                         
