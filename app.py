@@ -61,7 +61,7 @@ st.markdown("""
         margin: 10px 0;
     }
     .warning-box {
-        background-color: #fff3e0;  /* Hellorange */
+        background-color: #AB6400;  /* Hellorange */
         padding: 15px;
         border-radius: 8px;
         border-left: 4px solid #ff9800;  /* Orange */
