@@ -624,17 +624,17 @@ else:
                         titel = item.get("titel", "Unterlage")
                         beschreibung = item.get("beschreibung")
                         
-                        if beschreibung:
-                            # Mit Beschreibung → Expander
-                            with st.expander(f"**{counter}. {titel}**", expanded=False):
+                        # ALLE Punkte bekommen ein Expander (Dropdown)
+                        with st.expander(f"**{counter}. {titel}**", expanded=False):
+                            if beschreibung:
                                 st.write(beschreibung)
-                        else:
-                            # Ohne Beschreibung → Normaler Text
-                            st.markdown(f"**{counter}.** {titel}")
+                            else:
+                                st.caption("_Keine weiteren Details verfügbar_")
                         counter += 1
                     else:
-                        # Legacy Format (String)
-                        st.markdown(f"**{counter}.** {item}")
+                        # Legacy Format (String) - auch als Expander
+                        with st.expander(f"**{counter}. {item}**", expanded=False):
+                            st.caption("_Keine weiteren Details verfügbar_")
                         counter += 1
             else:
                 st.info("Keine Unterlagen gefunden")
