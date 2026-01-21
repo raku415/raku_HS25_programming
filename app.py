@@ -440,14 +440,54 @@ else:
         
         with col_right:
             st.subheader("ℹ️ Statistiken")
+            raumprogramm = data.get('raumprogramm', [])
             stats = {
                 "Textlänge": f"{data['meta']['length']:,} Zeichen",
                 "Sektionen": len(data.get('sektionen', [])),
                 "Unterlagen": len(data.get('einzureichende_unterlagen', [])),
-                "Kriterien": len(data.get('beurteilungskriterien', []))
+                "Kriterien": len(data.get('beurteilungskriterien', [])),
+                "Räume": len(raumprogramm) if raumprogramm else 0
             }
             for label, value in stats.items():
                 st.metric(label, value)
+        
+        # Raumprogramm-Übersicht (wenn vorhanden)
+        if raumprogramm and len(raumprogramm) > 0:
+            st.markdown("---")
+            st.subheader("🏢 Raumprogramm")
+            
+            # Berechne Statistiken
+            total_flaeche = sum(r.get('flaeche', 0) * r.get('anzahl', 1) for r in raumprogramm if isinstance(r.get('flaeche'), (int, float)))
+            total_raeume = sum(r.get('anzahl', 1) for r in raumprogramm)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Anzahl Räume", f"{len(raumprogramm)}")
+            with col2:
+                st.metric("Gesamtfläche", f"{total_flaeche:.1f} m²")
+            with col3:
+                st.metric("Total Einheiten", f"{total_raeume}")
+            
+            # Zeige Raumprogramm-Tabelle
+            with st.expander("📋 Raumprogramm Details anzeigen", expanded=False):
+                df_raum = pd.DataFrame(raumprogramm)
+                
+                # Formatiere Spalten
+                if 'flaeche' in df_raum.columns:
+                    df_raum['flaeche'] = df_raum['flaeche'].apply(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x)
+                
+                st.dataframe(
+                    df_raum,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "raumnummer": st.column_config.TextColumn("Nr.", width="small"),
+                        "raumname": st.column_config.TextColumn("Raumname", width="large"),
+                        "flaeche": st.column_config.TextColumn("Fläche (m²)", width="small"),
+                        "anzahl": st.column_config.NumberColumn("Anzahl", width="small"),
+                        "geschoss": st.column_config.TextColumn("Geschoss", width="small"),
+                    }
+                )
     
     # TAB 2: Unterlagen & Kriterien
     with tab2:
@@ -987,21 +1027,81 @@ else:
         
         with col2:
             st.subheader("📊 Excel Export")
-            st.write("Kontakte und Teilnehmer als Excel-Datei")
             
-            if kontakte or teilnehmende:
+            raumprogramm = data.get("raumprogramm", [])
+            has_data = kontakte or teilnehmende or raumprogramm
+            
+            if has_data:
+                # Zeige Vorschau des Raumprogramms wenn vorhanden
+                if raumprogramm:
+                    st.success(f"✅ {len(raumprogramm)} Räume gefunden")
+                    with st.expander("📋 Raumprogramm Vorschau"):
+                        df_preview = pd.DataFrame(raumprogramm)
+                        st.dataframe(df_preview.head(10), use_container_width=True)
+                else:
+                    st.info("ℹ️ Kontakte, Teilnehmer und weitere Daten")
+                
                 try:
                     from io import BytesIO
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Raumprogramm (WICHTIGSTE Daten zuerst!)
+                        if raumprogramm:
+                            df_raum = pd.DataFrame(raumprogramm)
+                            # Spalten in gewünschter Reihenfolge
+                            columns_order = ['raumnummer', 'raumname', 'flaeche', 'anzahl', 'geschoss']
+                            # Nur vorhandene Spalten verwenden
+                            existing_cols = [col for col in columns_order if col in df_raum.columns]
+                            df_raum = df_raum[existing_cols]
+                            
+                            # Schöne Spaltennamen für Excel
+                            df_raum.columns = ['Raumnummer', 'Raumname', 'Fläche (m²)', 'Anzahl', 'Geschoss']
+                            
+                            df_raum.to_excel(writer, sheet_name='Raumprogramm', index=False)
+                            
+                            # Formatiere das Sheet
+                            worksheet = writer.sheets['Raumprogramm']
+                            
+                            # Spaltenbreiten
+                            worksheet.column_dimensions['A'].width = 12  # Raumnummer
+                            worksheet.column_dimensions['B'].width = 30  # Raumname
+                            worksheet.column_dimensions['C'].width = 12  # Fläche
+                            worksheet.column_dimensions['D'].width = 10  # Anzahl
+                            worksheet.column_dimensions['E'].width = 12  # Geschoss
+                            
+                            # Header formatieren (fett)
+                            from openpyxl.styles import Font, PatternFill, Alignment
+                            header_font = Font(bold=True, color="FFFFFF")
+                            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                            
+                            for cell in worksheet[1]:
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = Alignment(horizontal='center')
+                        
+                        # Kontakte
                         if kontakte:
                             pd.DataFrame(kontakte).to_excel(writer, sheet_name='Kontakte', index=False)
+                        
+                        # Teilnehmende
                         if teilnehmende:
                             pd.DataFrame({'Teilnehmer': teilnehmende}).to_excel(writer, sheet_name='Teilnehmende', index=False)
                         
                         # Weitere Sheets
                         if data.get("einzureichende_unterlagen"):
-                            pd.DataFrame({'Unterlagen': data["einzureichende_unterlagen"]}).to_excel(writer, sheet_name='Unterlagen', index=False)
+                            unterlagen_data = []
+                            for item in data["einzureichende_unterlagen"]:
+                                if isinstance(item, dict):
+                                    unterlagen_data.append({
+                                        'Titel': item.get('titel', ''),
+                                        'Beschreibung': item.get('beschreibung', '')
+                                    })
+                                else:
+                                    unterlagen_data.append({'Titel': str(item), 'Beschreibung': ''})
+                            
+                            if unterlagen_data:
+                                pd.DataFrame(unterlagen_data).to_excel(writer, sheet_name='Unterlagen', index=False)
+                        
                         if data.get("beurteilungskriterien"):
                             pd.DataFrame({'Kriterien': data["beurteilungskriterien"]}).to_excel(writer, sheet_name='Kriterien', index=False)
                     

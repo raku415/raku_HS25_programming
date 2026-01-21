@@ -83,6 +83,7 @@ KRITISCHE FELDER (benötigen IMMER Korrekturvorschlag wenn leer/fehlerhaft):
 - Besichtigung Treffpunkt: Suche im Text nach "Treffpunkt", "Treff", "vor Ort", Adressen
 - Abgabeort: Vollständige Adresse mit PLZ und Ort
 - Kontakte: Name, E-Mail, Telefon
+- Raumprogramm: Prüfe ob alle Räume mit Raumnummer, Name, Fläche, Anzahl, Geschoss extrahiert wurden
 
 Wenn ein kritisches Feld fehlt oder fehlerhaft ist:
 - Suche intensiv im Originaltext nach Alternativen
@@ -110,6 +111,15 @@ Antworte im folgenden JSON-Format:
     "confidence": 90,
     "fehlende": ["name@example.ch"],
     "kommentar": ""
+  }},
+  "raumprogramm": {{
+    "korrekt": true/false,
+    "confidence": 85,
+    "anzahl_raeume_extrahiert": 12,
+    "anzahl_raeume_im_text": 15,
+    "fehlende_raeume": ["EG-13 Archiv"],
+    "kritisch": false,
+    "kommentar": "3 Räume wurden nicht extrahiert"
   }},
   "einzureichende_unterlagen": {{
     "korrekt": true/false,
