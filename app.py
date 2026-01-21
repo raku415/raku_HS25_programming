@@ -572,24 +572,29 @@ else:
         if unterlagen and len(unterlagen) > 0:
             first_item = unterlagen[0]
             if isinstance(first_item, dict):
-                # Nur als Einleitung behandeln wenn es explizit als "einleitung" markiert ist
-                # ODER wenn es eine sehr lange Beschreibung (> 300 Zeichen) hat UND Einleitungs-Keywords enthält
-                # UND der Titel typische Einleitungs-Wörter enthält
                 beschreibung = first_item.get("beschreibung", "")
                 titel = first_item.get("titel", "")
                 
                 is_einleitung = False
                 
-                # Explizit markiert
+                # Fall 1: Explizit markiert
                 if first_item.get("typ") == "einleitung":
                     is_einleitung = True
                     einleitung_text = beschreibung
-                # Sehr lange Beschreibung mit Einleitungs-Charakter
-                elif (len(beschreibung) > 300 and 
-                      re.search(r'(Es werden|Sämtliche|vorausgesetzt|einzureichen|Folgende.*sind)', beschreibung, re.I) and
-                      re.search(r'(Einzureichen|Abgabe|Unterlagen|Folgende)', titel, re.I)):
-                    is_einleitung = True
-                    einleitung_text = f"{titel} {beschreibung}".strip()
+                
+                # Fall 2: Lange Beschreibung (> 200 Zeichen) mit Einleitungs-Keywords
+                elif len(beschreibung) > 200:
+                    # Prüfe auf typische Einleitungs-Formulierungen
+                    if re.search(r'(sind.*einzureichen|einzureichende|Das Projekt|Die Pläne sind|abzugeben sind|Sämtliche|vorausgesetzt)', beschreibung, re.I):
+                        is_einleitung = True
+                        einleitung_text = f"{titel} {beschreibung}".strip()
+                
+                # Fall 3: Titel deutet auf Einleitung hin + hat Beschreibung
+                elif beschreibung and re.search(r'(Satz Pläne.*ungefalten|Einzureichen|Folgende.*einzureichen)', titel, re.I):
+                    # Nur wenn Beschreibung lang genug ist (> 150 Zeichen)
+                    if len(beschreibung) > 150:
+                        is_einleitung = True
+                        einleitung_text = f"{titel} {beschreibung}".strip()
                 
                 if is_einleitung:
                     start_index = 1  # Überspringe erstes Item bei der Anzeige
