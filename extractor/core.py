@@ -391,35 +391,40 @@ def extract_raumprogramm(txt: str):
     Returns:
         Liste von Dictionaries mit Rauminformationen
     """
-    # Finde Raumprogramm-Sektion
-    raumprogramm_match = re.search(r"(?i)(\d+\.\d+\s+)?Raumprogramm.*?(?=\n\s*\d+\s+[A-Z]|\Z)", txt, re.DOTALL)
-    if not raumprogramm_match:
-        return []
-    
-    sec = raumprogramm_match.group(0)
     raeume = []
-    lines = sec.splitlines()
     
-    in_table = False
+    # Suche nach Tabellen-Header direkt (robuster als nach Kapitelnummer zu suchen)
+    # Pattern: "Raumnummer Raumname Fläche [m²] Anzahl Geschoss" oder ohne [m²]
+    header_pattern = r"Raumnummer\s+Raumname\s+Fläche\s+(?:\[m²\])?\s*Anzahl\s+Geschoss"
     
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
+    # Finde alle Header-Vorkommen (es könnte mehrere Tabellen geben)
+    for header_match in re.finditer(header_pattern, txt, re.IGNORECASE):
+        # Extrahiere Text ab diesem Header bis zum nächsten großen Kapitel
+        start_pos = header_match.end()
         
-        # Skip Geschoss-Überschriften und Beschreibungen
-        if re.search(r"(?i)(Erdgeschoss|Obergeschoss|Untergeschoss|Dachgeschoss|typisches|optional)", stripped):
-            continue
+        # Finde Ende: Nächstes großes Kapitel (z.B. "4 Beurteilungskriterien") 
+        # oder nächster Tabellen-Header
+        end_match = re.search(r"\n\s*(?:[4-9]\s+[A-Z][a-z]+|Raumnummer\s+Raumname)", txt[start_pos:], re.IGNORECASE)
+        if end_match:
+            end_pos = start_pos + end_match.start()
+        else:
+            end_pos = len(txt)
         
-        # Erkenne Tabellen-Header
-        if re.search(r"(?i)Raumnummer\s+Raumname\s+Fläche.*Anzahl.*Geschoss", stripped):
-            in_table = True
-            continue
+        table_text = txt[start_pos:end_pos]
+        lines = table_text.splitlines()
         
-        # Parse Datenzeilen wenn in Tabelle
-        if in_table:
-            # Pattern für verschiedene Raumnummern-Formate
-            # Unterstützt: EG-01, 1OG-02, UG-01, 1.01, 2.03, etc.
+        # Parse die Zeilen
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or len(stripped) < 10:
+                continue
+            
+            # Skip Überschriften wie "Erdgeschoss (EG)", "Brun Emmenweid", etc.
+            if re.search(r"(?i)(Erdgeschoss|Obergeschoss|Untergeschoss|Dachgeschoss|Brun\s+Emmen|typisches|optional|falls vorgesehen)", stripped):
+                continue
+            
+            # Pattern für Datenzeilen
+            # Format: "EG-01 Eingangsbereich / Lobby 120 1 EG"
             pattern = r"^(?P<nr>[A-Z0-9\.-]+)\s+(?P<n>.+?)\s+(?P<flaeche>\d+(?:[.,]\d+)?)\s+(?P<anzahl>\d+)\s+(?P<geschoss>[A-Z0-9\.\s]+)$"
             
             match = re.match(pattern, stripped)
@@ -439,23 +444,20 @@ def extract_raumprogramm(txt: str):
                     geschoss = match.group('geschoss').strip()
                     
                     # Validierung: Name sollte Buchstaben und mindestens 3 Zeichen haben
+                    # Und nicht bereits vorhanden sein (Duplikate vermeiden)
                     if len(raum_name) >= 3 and any(c.isalpha() for c in raum_name):
-                        raeume.append({
-                            'raumnummer': raum_nr,
-                            'raumname': raum_name,
-                            'flaeche': flaeche,
-                            'anzahl': anzahl,
-                            'geschoss': geschoss
-                        })
+                        # Prüfe ob bereits vorhanden
+                        if not any(r['raumnummer'] == raum_nr for r in raeume):
+                            raeume.append({
+                                'raumnummer': raum_nr,
+                                'raumname': raum_name,
+                                'flaeche': flaeche,
+                                'anzahl': anzahl,
+                                'geschoss': geschoss
+                            })
                 except Exception as e:
                     # Fehler beim Parsen ignorieren
                     pass
-            else:
-                # Wenn Zeile nicht matched und wir schon Räume haben, prüfe ob Tabelle zu Ende
-                if len(raeume) > 0:
-                    # Prüfe ob neue Section beginnt
-                    if re.match(r"^[4-9]\s+[A-Z]", stripped):  # z.B. "4 Beurteilungskriterien"
-                        break
     
     return raeume
 
