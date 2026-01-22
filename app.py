@@ -61,7 +61,7 @@ st.markdown("""
         margin: 10px 0;
     }
     .warning-box {
-        background-color: #AB6400;  /* Hellorange */
+        background-color: #fff3e0;  /* Hellorange */
         padding: 15px;
         border-radius: 8px;
         border-left: 4px solid #ff9800;  /* Orange */
@@ -456,16 +456,6 @@ else:
             st.subheader("📍 Abgabeort")
             abg_ort = data.get("abgabeort")
             
-            # DEBUG: Zeige Typ und Struktur
-            with st.expander("🔍 Debug Info (klicke um zu öffnen)", expanded=False):
-                st.write(f"**Typ:** {type(abg_ort)}")
-                st.write(f"**Ist Dict:** {isinstance(abg_ort, dict)}")
-                if isinstance(abg_ort, dict):
-                    st.write(f"**Keys:** {list(abg_ort.keys())}")
-                    st.write(f"**raw_block vorhanden:** {'raw_block' in abg_ort}")
-                    st.write(f"**lines vorhanden:** {'lines' in abg_ort}")
-                st.json(abg_ort if isinstance(abg_ort, dict) else {"value": str(abg_ort)})
-            
             # Robuste Anzeige - handle verschiedene Formate
             if abg_ort:
                 displayed = False
@@ -767,17 +757,54 @@ else:
                                             st.markdown(f"**{llm.title()}** (Confidence: {field_corrections['confidences'][i]}%)")
                                             st.caption(f"💬 {field_corrections['kommentare'][i]}")
                                             
-                                            if isinstance(field_corrections['korrekturen'][i], dict):
-                                                for key, value in field_corrections['korrekturen'][i].items():
-                                                    st.text(f"  • {key.title()}: {value}")
+                                            korrektur = field_corrections['korrekturen'][i]
+                                            if isinstance(korrektur, dict):
+                                                # Spezielle Formatierung für Abgabeort
+                                                if field == 'abgabeort':
+                                                    if 'raw_block' in korrektur:
+                                                        st.text(f"  📍 {korrektur['raw_block'].replace(chr(10), ', ')}")
+                                                    elif 'lines' in korrektur:
+                                                        st.text(f"  📍 {', '.join(korrektur['lines'])}")
+                                                    elif 'adresse' in korrektur:
+                                                        st.text(f"  📍 {korrektur['adresse']}")
+                                                    else:
+                                                        for key, value in korrektur.items():
+                                                            if key not in ['source']:
+                                                                st.text(f"  • {key.title()}: {value}")
+                                                else:
+                                                    # Standard-Anzeige für andere Felder
+                                                    for key, value in korrektur.items():
+                                                        st.text(f"  • {key.title()}: {value}")
                                             st.markdown("---")
                                 
                                 # Zeige den besten Vorschlag prominent
                                 st.info(f"💡 **Bester Vorschlag** (von {best_llm.title()})")
                                 st.markdown(best_kommentar)
                                 st.markdown("**Vorgeschlagene Ergänzung:**")
-                                for key, value in best_correction.items():
-                                    st.markdown(f"• **{key.title()}:** {value}")
+                                
+                                # Spezielle Formatierung je nach Feld
+                                if field == 'abgabeort':
+                                    # Für Abgabeort: Zeige nur die Adresse, nicht die technischen Keys
+                                    if isinstance(best_correction, dict):
+                                        if 'raw_block' in best_correction:
+                                            adresse = best_correction['raw_block']
+                                            st.markdown(f"📍 {adresse.replace(chr(10), ', ')}")
+                                        elif 'lines' in best_correction:
+                                            lines = best_correction['lines']
+                                            st.markdown(f"📍 {', '.join(lines)}")
+                                        elif 'adresse' in best_correction:
+                                            st.markdown(f"📍 {best_correction['adresse']}")
+                                        else:
+                                            # Fallback
+                                            for key, value in best_correction.items():
+                                                if key not in ['source', 'raw_block', 'lines']:
+                                                    st.markdown(f"• **{key.title()}:** {value}")
+                                    else:
+                                        st.markdown(f"📍 {best_correction}")
+                                else:
+                                    # Für andere Felder: Standard-Anzeige
+                                    for key, value in best_correction.items():
+                                        st.markdown(f"• **{key.title()}:** {value}")
                             
                             with col2:
                                 # Übernehmen-Button
