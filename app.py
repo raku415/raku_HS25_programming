@@ -318,21 +318,19 @@ else:
     
     # Tabs für verschiedene Bereiche
     if enable_validation and 'llm_validation' in data:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Übersicht", 
-            "📋 Unterlagen & Kriterien", 
-            "👥 Teilnehmer & Kontakte",
-            "🤖 LLM-Validierung",
-            "💾 Export",
-            "🔍 Debug"
-        ])
-    else:
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Übersicht", 
             "📋 Unterlagen & Kriterien", 
             "👥 Teilnehmer & Kontakte",
-            "💾 Export",
-            "🔍 Debug"
+            "🤖 LLM-Validierung",
+            "💾 Export"
+        ])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Übersicht", 
+            "📋 Unterlagen & Kriterien", 
+            "👥 Teilnehmer & Kontakte",
+            "💾 Export"
         ])
     
     # TAB 1: Übersicht
@@ -530,7 +528,7 @@ else:
                 st.metric("Total Einheiten", f"{total_raeume}")
             
             # Zeige Raumprogramm-Tabelle
-            with st.expander("📋 Raumprogramm Details anzeigen", expanded=False):
+            with st.expander("📋 Vollständige Raumprogramm-Tabelle anzeigen", expanded=False):
                 df_raum = pd.DataFrame(raumprogramm)
                 
                 # Formatiere Spalten
@@ -752,7 +750,7 @@ else:
                             with col1:
                                 # Zeige alle LLMs und deren Vorschläge in einem Expander
                                 if num_llms > 1:
-                                    with st.expander(f"📋 Details von allen {num_llms} LLMs anzeigen", expanded=False):
+                                    with st.expander(f"📋 Alle {num_llms} LLM-Vorschläge anzeigen", expanded=False):
                                         for i, llm in enumerate(field_corrections['llms']):
                                             st.markdown(f"**{llm.title()}** (Confidence: {field_corrections['confidences'][i]}%)")
                                             st.caption(f"💬 {field_corrections['kommentare'][i]}")
@@ -1302,26 +1300,3 @@ else:
                     st.code("pip install openpyxl")
             else:
                 st.info("Keine exportierbaren Daten vorhanden")
-    
-    # TAB 6 (oder 5 wenn keine Validierung): Debug
-    debug_tab = tab6 if enable_validation and 'llm_validation' in data else tab5
-    with debug_tab:
-        st.header("🔍 Debug-Informationen")
-        
-        # Abgabetermin Debug
-        if data.get("abgabetermin"):
-            with st.expander("🗓️ Abgabetermin Details"):
-                st.json(data["abgabetermin"])
-        
-        # Abgabeort Debug
-        if data.get("abgabeort"):
-            with st.expander("📍 Abgabeort Details"):
-                st.json(data["abgabeort"])
-        
-        # Rohtext
-        with st.expander("📄 Rohtext (erste 5000 Zeichen)"):
-            st.text_area("Text", value=txt[:5000], height=300, disabled=True)
-        
-        # Alle Daten
-        with st.expander("💾 Vollständige Daten (JSON)"):
-            st.json(data)
